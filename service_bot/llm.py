@@ -19,6 +19,7 @@ import httpx
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 GITHUB_MODELS_BASE_URL = "https://models.github.ai/inference"
 POLLINATIONS_BASE_URL = "https://text.pollinations.ai/openai"
+LLM7_BASE_URL = "https://api.llm7.io/v1"
 OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
 
 ACTIONS = {"answer", "clarify", "no_answer"}
@@ -84,12 +85,20 @@ PRESETS: dict[str, ProviderPreset] = {
         True,
     ),
     "ollama": ProviderPreset(OLLAMA_BASE_URL, "llama3.2", (), False, json_mode=False),
+    "llm7": ProviderPreset(
+        LLM7_BASE_URL,
+        "GLM-5.3-Flash",
+        ("LLM_API_KEY", "LLM7_API_KEY"),
+        False,
+        json_mode=False,
+    ),
     "pollinations": ProviderPreset(
         POLLINATIONS_BASE_URL,
         "openai",
         (),
         False,
         json_mode=False,
+        minimal_payload=True,
     ),
     "custom": ProviderPreset("", "", ("LLM_API_KEY",), True),
 }
@@ -109,6 +118,7 @@ class LLMConfig:
     temperature: float = 0.0
     json_mode: bool = True
     minimal_payload: bool = False
+    needs_key: bool = True
     extra_body: Mapping[str, Any] = field(default_factory=dict)
 
     def public_view(self) -> dict:
@@ -149,7 +159,7 @@ def resolve_llm_config(env: Mapping[str, str] | None = None) -> LLMConfig | None
         elif _first_env(environment, ("GH_MODELS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")):
             provider = "github"
         else:
-            provider = "pollinations"
+            provider = "llm7"
     preset = PRESETS.get(provider)
     if preset is None:
         return None
@@ -175,6 +185,7 @@ def resolve_llm_config(env: Mapping[str, str] | None = None) -> LLMConfig | None
         cooldown=cooldown,
         json_mode=preset.json_mode,
         minimal_payload=preset.minimal_payload,
+        needs_key=preset.needs_key,
         extra_body=dict(preset.extra_body),
     )
 
@@ -359,7 +370,7 @@ class LLMRouter:
 
     async def route(self, *, system: str, user: str) -> RouteVerdict | None:
         """Ask the model which entry is relevant. None means "use the rule engine"."""
-        if not self.config.api_key and self.config.provider not in {"pollinations", "ollama"}:
+        if self.config.needs_key and not self.config.api_key:
             return None
         if self._disabled_until and self._clock() < self._disabled_until:
             self.fallbacks += 1

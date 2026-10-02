@@ -21,7 +21,11 @@ import httpx  # noqa: E402
 
 from service_bot.ai import SYSTEM_PROMPT, knowledge_digest  # noqa: E402
 from service_bot.knowledge import KnowledgeStore  # noqa: E402
-from service_bot.llm import POLLINATIONS_BASE_URL, resolve_llm_config  # noqa: E402
+from service_bot.llm import (  # noqa: E402
+    LLM7_BASE_URL,
+    POLLINATIONS_BASE_URL,
+    resolve_llm_config,
+)
 
 GITHUB_MODELS_BASE = "https://models.github.ai/inference"
 TOKEN_VARS = ("GH_MODELS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
@@ -107,6 +111,26 @@ def probe_keyless(digest: str) -> bool:
     """Find out what the keyless endpoint accepts; used only for the demo tier."""
     headers = {"Content-Type": "application/json"}
     short = {"role": "user", "content": "ответь одним словом: ок"}
+    bot_payload = {
+        "model": "GLM-5.3-Flash",
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT.format(digest=digest)},
+            {
+                "role": "user",
+                "content": "# Вопрос клиента\nКак почистить КАН Ультра?\n\n# Контекст диалога\nнет",
+            },
+        ],
+        "temperature": 0.0,
+        "max_tokens": 300,
+        "response_format": {"type": "json_object"},
+    }
+    llm7_full = probe(LLM7_BASE_URL, bot_payload, headers, "llm7: bot payload")[0]
+    llm7_minimal = probe(
+        LLM7_BASE_URL,
+        {"model": "GLM-5.3-Flash", "messages": [short]},
+        headers,
+        "llm7: minimal",
+    )[0]
     system = {"role": "system", "content": "Ты — маршрутизатор базы знаний."}
     minimal = probe(
         POLLINATIONS_BASE_URL,
@@ -139,7 +163,7 @@ def probe_keyless(digest: str) -> bool:
             }
         ],
     }
-    ok = minimal or with_accept
+    ok = llm7_full or llm7_minimal or minimal or with_accept
     for label, messages in prompt_variants.items():
         result = probe(
             POLLINATIONS_BASE_URL,

@@ -57,9 +57,19 @@ def test_auto_falls_back_to_github_models_with_a_workflow_token():
 def test_auto_without_credentials_uses_the_keyless_demo_endpoint():
     resolved = resolve_llm_config({})
     assert resolved is not None
-    assert resolved.provider == "pollinations"
+    assert resolved.provider == "llm7"
+    assert resolved.base_url == "https://api.llm7.io/v1"
+    assert resolved.model == "GLM-5.3-Flash"
     assert resolved.api_key == ""
-    assert resolved.extra_body == {}  # keyless payload: some params trigger a paid path
+    assert resolved.needs_key is False
+
+
+def test_pollinations_stays_available_as_a_keyless_fallback():
+    resolved = resolve_llm_config({"LLM_PROVIDER": "pollinations"})
+    assert resolved is not None
+    assert resolved.api_key == ""
+    assert resolved.minimal_payload is True  # some params trigger a paid path there
+    assert resolved.extra_body == {}
 
 
 @pytest.mark.parametrize("value", ["0", "off", "false", "disabled"])
