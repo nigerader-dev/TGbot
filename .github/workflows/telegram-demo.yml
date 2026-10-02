@@ -25,6 +25,7 @@ on:
 permissions:
   contents: read
   models: read
+  pull-requests: write
 
 concurrency:
   group: telegram-bot-${{ github.repository_id }}
@@ -75,6 +76,23 @@ jobs:
             cat "$RUNNER_TEMP/ai-check.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the AI check to the pull request
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')
+          if [ -n "$NUMBER" ] && [ "$NUMBER" != "null" ]; then
+            {
+              echo "### Живой запуск: проверка ИИ-слоя (GitHub Models)"
+              echo ""
+              echo '```'
+              cat "$RUNNER_TEMP/ai-check.txt"
+              echo '```'
+              echo "Bot API проверяется следующим шагом; живая сессия — в job *Manual live Telegram test*."
+            } > "$RUNNER_TEMP/ai-comment.md"
+            gh pr comment "$NUMBER" --body-file "$RUNNER_TEMP/ai-comment.md"
+          fi
       - name: Verify real Telegram API
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
