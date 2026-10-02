@@ -1,4 +1,4 @@
-name: Telegram - hosted bot (GitHub Models AI)
+name: Telegram - hosted bot (scheduled AI sessions)
 
 # Непрерывный хостинг прототипа средствами GitHub: каждый запуск держит одного
 # polling-процесса до 6 часов, расписание перезапускает его каждые 6 часов.

@@ -67,13 +67,15 @@ jobs:
       - name: Verify the AI layer
         continue-on-error: true
         run: |
-          python -m service_bot ai-check > "$RUNNER_TEMP/ai-check.txt" 2>&1 || true
-          if grep -q "нет ответов модели\|модель не дала решений" "$RUNNER_TEMP/ai-check.txt"; then
+          if python -m service_bot ai-check > "$RUNNER_TEMP/ai-check.txt" 2>&1; then
+            echo "::notice title=AI layer::model answered from the knowledge base"
+          else
+            # No usable model: publish why, and which free endpoint still answers.
             python scripts/check_models.py >> "$RUNNER_TEMP/ai-check.txt" 2>&1 || true
           fi
           cat "$RUNNER_TEMP/ai-check.txt"
           {
-            echo "## ИИ-слой (GitHub Models)"
+            echo "## ИИ-слой"
             echo '```'
             cat "$RUNNER_TEMP/ai-check.txt"
             echo '```'
@@ -86,7 +88,7 @@ jobs:
           NUMBER=$(gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number')
           if [ -n "$NUMBER" ] && [ "$NUMBER" != "null" ]; then
             {
-              echo "### Живой запуск: проверка ИИ-слоя (GitHub Models)"
+              echo "### Живой запуск: проверка ИИ-слоя"
               echo ""
               echo '```'
               cat "$RUNNER_TEMP/ai-check.txt"
@@ -150,7 +152,7 @@ jobs:
         run: |
           echo "## Manual live test" >> "$GITHUB_STEP_SUMMARY"
           echo "$BOT_URL" >> "$GITHUB_STEP_SUMMARY"
-          echo "AI: GitHub Models (openai/gpt-4o-mini). If it is rate limited, answers fall back to the rules." >> "$GITHUB_STEP_SUMMARY"
+          echo "AI: ${{ vars.LLM_PROVIDER || 'llm7' }} / ${{ vars.LLM_MODEL || 'GLM-5.3-Flash' }}. If the model is unavailable, answers fall back to the knowledge-base rules." >> "$GITHUB_STEP_SUMMARY"
           echo "Stops after $DEMO_MINUTES minutes. This is a bounded acceptance session, not permanent hosting." >> "$GITHUB_STEP_SUMMARY"
       - name: Manual live Telegram acceptance session
         env:

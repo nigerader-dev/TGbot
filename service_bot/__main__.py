@@ -75,16 +75,20 @@ async def _run_ai_check(knowledge: KnowledgeStore, assistant: AIAssistant) -> in
             f"- {question!r}: status={reply.status}, entry_id={reply.entry_id}, "
             f"layer={layer}, action={meta.get('action')}, latency_ms={meta.get('latency_ms')}"
         )
-    if answered_by_model:
-        print("Проверка ИИ: успешно, модель вернула решения по смыслу")
-        return 0
     router = assistant.router
+    if router is not None:
+        print(
+            f"Модель: state={router.state}, calls={router.calls}, "
+            f"ответов={router.answered}, уточнений={router.clarified}, "
+            f"отказов={router.no_answer}, резерв={router.fallbacks}, "
+            f"last_error={router.last_error or 'нет'}, "
+            f"detail={router.last_error_detail or 'нет'!r}"
+        )
+    if answered_by_model:
+        print(f"Проверка ИИ: успешно, модель вернула решения по смыслу ({answered_by_model})")
+        return 0
     print(
-        "Проверка ИИ: модель не дала решений; "
-        f"state={getattr(router, 'state', 'unknown')}, "
-        f"last_error={getattr(router, 'last_error', None) or 'нет'}, "
-        f"detail={getattr(router, 'last_error_detail', None) or 'нет'!r}, "
-        f"calls={getattr(router, 'calls', 0)}, fallbacks={getattr(router, 'fallbacks', 0)}. "
+        "Проверка ИИ: модель не дала решений по смыслу. "
         "Бот продолжит отвечать на правилах базы знаний."
     )
     return 3

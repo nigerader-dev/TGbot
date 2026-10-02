@@ -299,6 +299,65 @@ def test_broken_model_answers_are_reported_as_kinds(response, expected):
     asyncio.run(router.aclose())
 
 
+def test_router_reads_the_verdict_from_the_thinking_channel():
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Сейчас подумаю...",
+                            "reasoning_content": '{"action":"answer","entry_id":"kit_frequency"}',
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    router = LLMRouter(config(retries=0), client=client)
+    verdict = route(router)
+    assert verdict is not None
+    assert verdict.entry_id == "kit_frequency"
+    assert router.state == "ready"
+    asyncio.run(router.aclose())
+
+
+def test_router_prefers_the_last_json_object_in_a_chatty_answer():
+    chatty = (
+        '{"action":"no_answer"} ... на самом деле: {"action":"answer","entry_id":"kit_frequency"}'
+    )
+
+    def handler(request):
+        return completion(chatty)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    router = LLMRouter(config(retries=0), client=client)
+    verdict = route(router)
+    assert verdict is not None
+    assert verdict.action == "answer"
+    asyncio.run(router.aclose())
+
+
+def test_malformed_answers_pause_the_model_briefly_instead_of_disabling_it():
+    clock = {"now": 0.0}
+
+    def handler(request):
+        return completion("не JSON вовсе")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    router = LLMRouter(config(retries=0, cooldown=300.0), client=client, clock=lambda: clock["now"])
+    for _ in range(LLMRouter.FAILURE_THRESHOLD):
+        assert route(router) is None
+    assert router.state == "cooling_down"
+    clock["now"] = 61.0  # a short pause, not the full endpoint cooldown
+    assert router.state == "ready"
+    assert router.last_error == "bad_verdict"
+    asyncio.run(router.aclose())
+
+
 def test_router_is_idle_when_the_ai_layer_is_off():
     router = LLMRouter(config(provider="openai", api_key=""))
     assert route(router) is None

@@ -234,6 +234,19 @@ def _first_json_object(text: str) -> dict | None:
     return None
 
 
+def _last_json_object(text: str) -> dict | None:
+    """Return the last balanced JSON object: free models often explain, then decide."""
+    found: dict | None = None
+    start = text.find("{")
+    while start != -1:
+        candidate = _first_json_object(text[start:])
+        if candidate is None:
+            break
+        found = candidate
+        start = text.find("{", start + 1)
+    return found
+
+
 @dataclass(frozen=True)
 class RouteVerdict:
     action: str
@@ -245,12 +258,19 @@ class RouteVerdict:
 
 def parse_verdict(content: Any) -> RouteVerdict | None:
     """Parse a model answer into a verdict. Anything unexpected returns None."""
-    if isinstance(content, str):
-        payload = _first_json_object(content)
-    elif isinstance(content, dict):
-        payload = content
-    else:
-        payload = None
+    if isinstance(content, dict):
+        return _verdict_from_payload(content)
+    if not isinstance(content, str):
+        return None
+    # Free chatty models explain first and decide last: the last object wins.
+    for extract in (_last_json_object, _first_json_object):
+        verdict = _verdict_from_payload(extract(content))
+        if verdict is not None:
+            return verdict
+    return None
+
+
+def _verdict_from_payload(payload: Any) -> RouteVerdict | None:
     if not isinstance(payload, dict):
         return None
     action = str(payload.get("action", "")).strip().lower()
@@ -287,6 +307,7 @@ class LLMRouter:
         self._client = client
         self._clock = clock
         self._failures = 0
+        self._format_failures = 0
         self._disabled_until = 0.0
         self.last_error: str | None = None
         self.last_error_detail: str | None = None
@@ -356,8 +377,22 @@ class LLMRouter:
             self._disabled_until = self._clock() + self.config.cooldown
             self._failures = 0
 
+    def _record_format_failure(self, detail: str | None = None) -> None:
+        """The model answered, but not in the expected shape.
+
+        A chatty free-tier model must not trip the long breaker that protects against
+        a dead endpoint: three malformed answers only pause the model briefly.
+        """
+        self._format_failures += 1
+        self.last_error = "bad_verdict"
+        self.last_error_detail = self._sanitize(detail) if detail else None
+        if self._format_failures >= self.FAILURE_THRESHOLD:
+            self._disabled_until = self._clock() + min(self.config.cooldown, 60.0)
+            self._format_failures = 0
+
     def _record_success(self, verdict: RouteVerdict) -> None:
         self._failures = 0
+        self._format_failures = 0
         self._disabled_until = 0.0
         self.last_error = None
         self.last_error_detail = None
@@ -403,14 +438,18 @@ class LLMRouter:
                         continue
                 break
             try:
-                data = response.json()
-                content = data["choices"][0]["message"]["content"]
-            except (ValueError, KeyError, IndexError, TypeError):
+                message = response.json()["choices"][0]["message"]
+                content = message.get("content")
+                reasoning = message.get("reasoning_content")
+            except (ValueError, KeyError, IndexError, TypeError, AttributeError):
                 self._record_failure("bad_response", response.text)
                 break
             verdict = parse_verdict(content)
             if verdict is None:
-                self._record_failure("bad_verdict", str(content))
+                # Some reasoning models keep the JSON only in the thinking channel.
+                verdict = parse_verdict(reasoning)
+            if verdict is None:
+                self._record_format_failure(str(content))
                 break
             self._record_success(verdict)
             return RouteVerdict(
