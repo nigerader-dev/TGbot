@@ -1,8 +1,8 @@
-"""Diagnose GitHub Models access from CI without printing any secret.
+"""Diagnose which free LLM endpoint actually answers from CI (no secrets printed).
 
-Repeats the *exact* request the bot sends (same messages, model, temperature,
-max_tokens and response_format) and prints the HTTP status plus a short body, so a
-failing AI layer can be debugged from a pull-request comment.
+The script repeats the real bot request against GitHub Models and, if that fails,
+against the keyless community endpoint, printing status, useful headers and a short
+body preview. Results are published as a pull-request comment.
 
 Run:  python scripts/check_models.py
 """
@@ -16,10 +16,11 @@ import httpx
 
 from service_bot.ai import SYSTEM_PROMPT, knowledge_digest
 from service_bot.knowledge import KnowledgeStore
-from service_bot.llm import resolve_llm_config
+from service_bot.llm import POLLINATIONS_BASE_URL, resolve_llm_config
 
-BASE_URL = "https://models.github.ai/inference"
+GITHUB_MODELS_BASE = "https://models.github.ai/inference"
 TOKEN_VARS = ("GH_MODELS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
+PREVIEW = 200
 
 
 def find_token() -> str:
@@ -28,40 +29,36 @@ def find_token() -> str:
         if value:
             print(f"token: present in {name} ({len(value)} chars), value never printed")
             return value
-    print("token: missing (set GH_MODELS_TOKEN or LLM_API_KEY)")
+    print("token: none found in the environment")
     return ""
 
 
-def call(payload: dict, token: str, *, label: str) -> bool:
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
+def probe(url: str, payload: dict, headers: dict, label: str) -> tuple[bool, str]:
     try:
-        response = httpx.post(
-            f"{BASE_URL}/chat/completions", headers=headers, json=payload, timeout=30
-        )
+        response = httpx.post(url, headers=headers, json=payload, timeout=40)
     except httpx.HTTPError as exc:
         print(f"{label}: ERROR {type(exc).__name__}")
-        return False
+        return False, ""
+    server = response.headers.get("server", "-")
+    print(
+        f"{label}: HTTP {response.status_code} server={server} "
+        f"content-type={response.headers.get('content-type', '-')}"
+    )
     body = " ".join(response.text.split())
-    print(f"{label}: HTTP {response.status_code} {body[:300]}")
+    print(f"{label}: body={body[:PREVIEW]!r}")
     if response.status_code != 200:
-        return False
+        return False, ""
     try:
         content = response.json()["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError):
-        print(f"{label}: ответ 200 без choices[0].message.content")
-        return False
-    print(f"{label}: content={content[:120]!r}")
-    return True
+        print(f"{label}: 200 без choices[0].message.content — ответ не от модели")
+        return False, ""
+    print(f"{label}: content={content[:160]!r}")
+    return True, content
 
 
 def main() -> int:
     token = find_token()
-    if not token:
-        return 1
     config = resolve_llm_config(os.environ)
     model = config.model if config else "openai/gpt-4o-mini"
     digest = knowledge_digest(KnowledgeStore.load())
@@ -83,18 +80,49 @@ def main() -> int:
         "max_tokens": 300,
         "response_format": {"type": "json_object"},
     }
-    ok = call(dict(exact), token, label=f"точный запрос бота ({model})")  # noqa: B008
+    format_headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    github_headers = {
+        **format_headers,
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    ok, _ = probe(f"{GITHUB_MODELS_BASE}/chat/completions", exact, format_headers, "github: exact")
     if not ok:
-        without_format = {k: v for k, v in exact.items() if k != "response_format"}
-        ok = call(without_format, token, label="тот же запрос без response_format")
+        ok, _ = probe(
+            f"{GITHUB_MODELS_BASE}/chat/completions", exact, github_headers, "github: docs headers"
+        )
     if not ok:
         short = {
             "model": model,
-            "messages": [{"role": "user", "content": 'ответь JSON {"action":"no_answer"}'}],
-            "max_tokens": 20,
+            "messages": [{"role": "user", "content": "ответь: ок"}],
+            "max_tokens": 5,
         }
-        ok = call(short, token, label="короткий запрос без system")
-    print("GitHub Models: доступен" if ok else "GitHub Models: запрос бота отклонён")
+        ok, _ = probe(
+            f"{GITHUB_MODELS_BASE}/chat/completions", short, github_headers, "github: minimal"
+        )
+    if not ok:
+        try:
+            models = httpx.get(f"{GITHUB_MODELS_BASE}/models", headers=github_headers, timeout=30)
+            print(f"github: GET /models HTTP {models.status_code} {models.text[:160]!r}")
+        except httpx.HTTPError as exc:
+            print(f"github: GET /models ERROR {type(exc).__name__}")
+        poll, _ = probe(
+            POLLINATIONS_BASE_URL,
+            {
+                "model": "openai",
+                "messages": [{"role": "user", "content": "ответь одним словом: ок"}],
+                "referrer": "github.com/nigerader-dev/TGbot",
+            },
+            {"Content-Type": "application/json"},
+            "pollinations: minimal",
+        )
+        ok = ok or poll
+    print("Итог: внешняя модель доступна" if ok else "Итог: внешние модели недоступны")
     return 0 if ok else 1
 
 

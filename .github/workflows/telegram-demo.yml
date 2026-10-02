@@ -11,6 +11,7 @@ on:
       - 'service_bot/**'
       - 'knowledge/**'
       - 'tests/**'
+      - 'scripts/**'
       - 'requirements*.txt'
       - 'pyproject.toml'
       - '.github/workflows/telegram-demo.yml'
