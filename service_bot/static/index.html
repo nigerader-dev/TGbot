@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#123e45">
+  <title>Сервисный помощник — только проверенные ответы</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 8c3-4 5 4 9 0s6 4 9 0M3 13c3-4 5 4 9 0s6 4 9 0M3 18c3-4 5 4 9 0s6 4 9 0"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m3 11 18-8-8 18-2-8-8-2Z"/><path d="m11 13 10-10"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="4"/><path d="m10 9 5 3-5 3V9Z"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4m8-4v4M4 10h16m-11 5 2 2 4-4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m10 4-8 14a2 2 0 0 0 2 3h16a2 2 0 0 0 2-3L14 4a2 2 0 0 0-4 0Z"/><path d="M12 9v5m0 3v.2"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V5c-3-1-6-1-9 1Zm0 0v15"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M14 3h7v7m0-7L10 14m0-9H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></symbol>
+</svg>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/" aria-label="Сервисный помощник, главная">
+      <span class="brand-mark"><svg><use href="#i-wave"/></svg></span>
+      <span>Сервис<span class="brand-light"> / помощник</span><small>База знаний вместо догадок</small></span>
+    </a>
+    <div class="header-actions">
+      <span class="live-badge" id="live-badge"><span class="status-dot"></span>Проверяем подключение</span>
+      <button class="telegram-button" id="telegram-nav"><svg><use href="#i-send"/></svg><span>Telegram</span><svg class="small-icon"><use href="#i-arrow"/></svg></button>
+    </div>
+  </div>
+</header>
+<main class="page">
+  <section class="hero">
+    <div><p class="eyebrow"><span></span>ПОМОЩНИК СЕРВИСНОГО ОТДЕЛА</p><h1>Точные ответы.<br><span>Без догадок.</span></h1><p class="hero-description">Вопросы по обслуживанию станции — с ответами<br class="desktop-break"> только из предоставленной базы знаний.</p></div>
+    <div class="policy-card"><span class="policy-icon"><svg><use href="#i-shield"/></svg></span><div><strong>Нет информации — нет выдумок</strong><p>Если ответа нет в базе, помощник честно<br class="desktop-break"> сообщит об этом и направит в сервисный отдел.</p></div></div>
+  </section>
+  <nav class="tabs" role="tablist" aria-label="Разделы прототипа">
+    <button class="tab active" id="tab-dialog" role="tab" aria-selected="true" aria-controls="panel-dialog" data-tab="dialog"><svg><use href="#i-wave"/></svg>Проверить помощника<span class="tab-tag">ДЕМО</span></button>
+    <button class="tab" id="tab-knowledge" role="tab" aria-selected="false" aria-controls="panel-knowledge" data-tab="knowledge"><svg><use href="#i-book"/></svg>База знаний<span class="count" id="entry-count">…</span></button>
+    <button class="tab" id="tab-setup" role="tab" aria-selected="false" aria-controls="panel-setup" data-tab="setup"><svg><use href="#i-send"/></svg>Подключение Telegram</button>
+  </nav>
+  <section class="dialog-layout" id="panel-dialog" role="tabpanel" aria-labelledby="tab-dialog">
+    <aside class="examples">
+      <p class="eyebrow muted">ПОПРОБУЙТЕ СПРОСИТЬ</p><h2>Четыре вопроса.<br>Один принцип.</h2><p class="section-description">Выберите пример или напишите<br>вопрос своими словами.</p>
+      <div class="example-list" id="example-list">
+        <button class="example" data-question="Как почистить КАН Ультра?"><span class="example-icon"><svg><use href="#i-play"/></svg></span><span><strong>Очистка КАН Ультра</strong><small>Видеоинструкция</small></span><svg class="example-arrow"><use href="#i-arrow"/></svg></button>
+        <button class="example" data-question="Как часто нужно обслуживать станцию КИТ?"><span class="example-icon"><svg><use href="#i-calendar"/></svg></span><span><strong>Обслуживание КИТ</strong><small>Как часто это делать?</small></span><svg class="example-arrow"><use href="#i-arrow"/></svg></button>
+        <button class="example" data-question="У меня переполнена станция. Что делать?"><span class="example-icon"><svg><use href="#i-alert"/></svg></span><span><strong>Станция переполнена</strong><small>Первые действия</small></span><svg class="example-arrow"><use href="#i-arrow"/></svg></button>
+        <button class="example unknown-example" data-question="Как почистить станцию Тверь?"><span class="example-icon unknown-icon">?</span><span><strong>А что со станцией Тверь?</strong><small>Проверка: информации нет</small></span><svg class="example-arrow"><use href="#i-arrow"/></svg></button>
+      </div>
+      <div class="sidebar-note"><svg><use href="#i-check"/></svg><p>Демо и Telegram используют<br><strong>один и тот же механизм ответов.</strong></p></div>
+    </aside>
+    <section class="chat-card" aria-label="Диалог с сервисным помощником">
+      <div class="chat-header"><div class="assistant-avatar"><svg><use href="#i-wave"/></svg></div><div><h2>Сервисный помощник</h2><p><span class="status-dot"></span><span id="chat-status">Загружаем базу знаний</span></p></div><button class="icon-button" id="reset-chat" title="Новый диалог" aria-label="Новый диалог"><svg><use href="#i-reset"/></svg></button></div>
+      <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Сообщения"><div class="conversation-date">ТЕСТОВЫЙ ДИАЛОГ</div></div>
+      <div class="chat-bottom"><form id="chat-form"><label class="sr-only" for="question">Ваш вопрос</label><textarea id="question" rows="2" maxlength="1500" placeholder="Например: как почистить КАН Ультра?" required></textarea><button class="send-button" id="send-button" type="submit" aria-label="Отправить вопрос"><svg><use href="#i-arrow"/></svg></button></form><div class="input-footer"><span><svg><use href="#i-shield"/></svg>Только проверенная информация</span><span>Enter — отправить</span></div></div>
+    </section>
+  </section>
+  <section id="panel-knowledge" class="knowledge-panel" role="tabpanel" aria-labelledby="tab-knowledge" hidden>
+    <div class="panel-heading"><div><p class="eyebrow muted">ЕДИНСТВЕННЫЙ ИСТОЧНИК ОТВЕТОВ</p><h2>Небольшая база. Проверенные сведения.</h2><p>Ниже — полное содержимое базы, а не сгенерированные пересказы.</p></div><span class="file-chip">knowledge/knowledge_base.json</span></div>
+    <div class="knowledge-grid" id="knowledge-grid"></div>
+    <div class="knowledge-note"><svg><use href="#i-book"/></svg><p>Новая информация добавляется в JSON-файл: модель, тема, утверждённый ответ и источник. После изменения запустите <code>python -m service_bot validate-kb</code>, тесты и перезапустите процесс. Подробный пример — в README.</p></div>
+  </section>
+  <section id="panel-setup" class="setup-panel" role="tabpanel" aria-labelledby="tab-setup" hidden>
+    <div class="panel-heading"><div><p class="eyebrow muted">НАСТОЯЩИЙ TELEGRAM BOT API</p><h2>Подключите бота к Telegram</h2><p>Веб-демо уже работает. Для реального Telegram нужен токен вашего бота.</p></div></div>
+    <div class="setup-status"><span class="status-dot" id="telegram-dot"></span><div><strong id="telegram-state">Проверяем статус…</strong><p id="telegram-description"></p></div><a class="primary-link" id="telegram-link" target="_blank" rel="noopener noreferrer" hidden>Открыть бота <svg><use href="#i-link"/></svg></a></div>
+    <div class="setup-steps">
+      <article><span>01</span><div><h3>Создайте бота</h3><p>Откройте <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a>, выполните <code>/newbot</code> и получите токен.</p></div></article>
+      <article><span>02</span><div><h3>Задайте токен локально</h3><p>Скопируйте <code>.env.example</code> в <code>.env</code> и заполните <code>TELEGRAM_BOT_TOKEN</code>. Файл исключён из Git. Не присылайте токен в чат.</p></div></article>
+      <article><span>03</span><div><h3>Перезапустите процесс</h3><p>Из корня репозитория выполните <code>python -m service_bot serve</code> в активированном виртуальном окружении. Запустятся веб-демо и Telegram polling. Для запуска только бота: <code>python -m service_bot telegram</code>. Не запускайте два polling-процесса с одним токеном.</p></div></article>
+      <article><span>04</span><div><h3>Проверьте живой диалог</h3><p>Откройте своего бота, отправьте <code>/start</code> и четыре тестовых вопроса. Для сброса выбранной модели используйте <code>/reset</code>.</p></div></article>
+    </div>
+    <p class="setup-footnote">Телефон и адрес сервисного отдела не предоставлены. Помощник не выдумывает контакты.</p>
+  </section>
+  <noscript><p class="setup-status">Для интерактивного демо включите JavaScript. Telegram-бот не зависит от браузера.</p></noscript>
+</main>
+<footer class="footer"><span>Сервисный помощник<span class="footer-dot">·</span>Рабочий прототип</span><span><svg><use href="#i-shield"/></svg>Ответ из базы или честное «нет информации»</span></footer>
+</body>
+</html>
