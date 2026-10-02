@@ -138,8 +138,21 @@ def probe_keyless() -> bool:
         POLLINATIONS_BASE_URL,
         {"model": "openai", "messages": [{"role": "user", "content": "ответь: ок"}]},
         {"Content-Type": "application/json"},
-        "pollinations",
+        "pollinations: minimal",
     )[0]
+    # Extra parameters are what the free tier rejected earlier; the bot now omits them.
+    probe(
+        POLLINATIONS_BASE_URL,
+        {
+            "model": "openai",
+            "messages": [{"role": "user", "content": "ответь: ок"}],
+            "temperature": 0.0,
+            "max_tokens": 300,
+            "response_format": {"type": "json_object"},
+        },
+        {"Content-Type": "application/json"},
+        "pollinations: full params",
+    )
     return found or pollinations
 
 

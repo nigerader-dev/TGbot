@@ -42,6 +42,7 @@ class ProviderPreset:
     key_env: tuple[str, ...]
     needs_key: bool
     json_mode: bool = True
+    minimal_payload: bool = False
     extra_body: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -107,6 +108,7 @@ class LLMConfig:
     max_tokens: int = 300
     temperature: float = 0.0
     json_mode: bool = True
+    minimal_payload: bool = False
     extra_body: Mapping[str, Any] = field(default_factory=dict)
 
     def public_view(self) -> dict:
@@ -172,6 +174,7 @@ def resolve_llm_config(env: Mapping[str, str] | None = None) -> LLMConfig | None
         retries=retries,
         cooldown=cooldown,
         json_mode=preset.json_mode,
+        minimal_payload=preset.minimal_payload,
         extra_body=dict(preset.extra_body),
     )
 
@@ -315,9 +318,13 @@ class LLMRouter:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
         }
+        if self.config.minimal_payload:
+            # Some free endpoints reject or bill extra parameters.
+            payload.update(self.config.extra_body)
+            return payload
+        payload["temperature"] = self.config.temperature
+        payload["max_tokens"] = self.config.max_tokens
         if self.config.json_mode:
             payload["response_format"] = {"type": "json_object"}
         payload.update(self.config.extra_body)

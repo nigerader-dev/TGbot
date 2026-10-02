@@ -19,6 +19,7 @@ from .llm import LLMConfig, LLMRouter, RouteVerdict
 
 MIN_WORD_LENGTH = 4
 PREFIX_LENGTH = 6
+ANSWER_PREVIEW = 240
 
 SYSTEM_PROMPT = """Ты — маршрутизатор базы знаний сервисного отдела компании.
 Ты НЕ отвечаешь клиенту и НЕ пишешь инструкций. Твоя единственная задача — определить,
@@ -65,6 +66,9 @@ def knowledge_digest(knowledge: KnowledgeStore) -> str:
             else "любая модель (общий факт)"
         )
         intent = knowledge.intents.get(entry.intent_id)
+        answer_preview = " ".join(entry.answer.split())
+        if len(answer_preview) > ANSWER_PREVIEW:
+            answer_preview = answer_preview[:ANSWER_PREVIEW] + "…"
         lines.append(
             f'\nЗапись entry_id="{entry.id}"\n'
             f"  Модель: {station}\n"
@@ -72,7 +76,7 @@ def knowledge_digest(knowledge: KnowledgeStore) -> str:
             "  Типовые вопросы клиентов: "
             + " | ".join(f"«{example}»" for example in entry.examples)
             + "\n  Утверждённый ответ (отправляется клиенту дословно): "
-            + entry.answer
+            + answer_preview
         )
     return "\n".join(lines)
 

@@ -36,7 +36,25 @@ def build_assistant(knowledge: KnowledgeStore) -> AIAssistant:
     return AIAssistant(AnswerEngine(knowledge), router=router, config=config)
 
 
+async def session_with_close(
+    bot: TelegramBot, assistant: AIAssistant, duration: int | None
+) -> None:
+    """Polling session; the AI client is closed in the same event loop."""
+    try:
+        await run_telegram(bot, duration=duration)
+    finally:
+        await assistant.aclose()
+
+
 async def run_ai_check(knowledge: KnowledgeStore, assistant: AIAssistant) -> int:
+    """Check the AI layer; the HTTP client is closed in this same event loop."""
+    try:
+        return await _run_ai_check(knowledge, assistant)
+    finally:
+        await assistant.aclose()
+
+
+async def _run_ai_check(knowledge: KnowledgeStore, assistant: AIAssistant) -> int:
     if not assistant.enabled:
         print(
             "ИИ-слой выключен: не задан LLM_API_KEY / GH_MODELS_TOKEN. "
@@ -125,10 +143,7 @@ def main() -> int:
             print("Промпт маршрутизации:")
             print(knowledge_digest(knowledge))
             return 0
-        try:
-            return asyncio.run(run_ai_check(knowledge, assistant))
-        finally:
-            asyncio.run(assistant.aclose())
+        return asyncio.run(run_ai_check(knowledge, assistant))
     if args.command in {"telegram", "probe-telegram"}:
         token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
         if not token:
@@ -152,11 +167,9 @@ def main() -> int:
             return 0
         bot = TelegramBot(token, assistant)
         try:
-            asyncio.run(run_telegram(bot, duration=duration))
+            asyncio.run(session_with_close(bot, assistant, duration))
         except KeyboardInterrupt:
             return 0
-        finally:
-            asyncio.run(assistant.aclose())
         if bot.status.state == "error":
             print(bot.status.message, file=sys.stderr)
             return 1
