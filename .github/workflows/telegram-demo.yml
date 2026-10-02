@@ -3,6 +3,13 @@ name: Telegram - live acceptance test
 on:
   push:
     branches: [arena/01a0fe03-tgbot]
+    paths:
+      - 'service_bot/**'
+      - 'knowledge/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/telegram-demo.yml'
   workflow_dispatch:
     inputs:
       duration_minutes:
@@ -20,12 +27,12 @@ concurrency:
 
 jobs:
   live-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
       DEMO_MINUTES: ${{ inputs.duration_minutes || '15' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Check private token configuration
@@ -36,7 +43,7 @@ jobs:
             echo "::error::Create the TELEGRAM_BOT_TOKEN repository Actions secret. Never put the token in source code."
             exit 1
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip
@@ -57,13 +64,15 @@ jobs:
           import json, os
           from pathlib import Path
           data = json.loads(Path('.cache/telegram-ready.json').read_text())
+          print('::notice title=Telegram API checked::' + json.dumps(data, ensure_ascii=True))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write(f"## Telegram connection verified\n\n{data['bot_url']}\n\n")
               summary.write(f"Knowledge entries: {data['entry_count']}. Send `/start`.\n\n")
               summary.write(f"Manual live test: {os.environ['DEMO_MINUTES']} minutes. ")
               summary.write("The bot stops after this test. GitHub Actions is not permanent hosting.\n")
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Publish public readiness artifact
+        uses: actions/upload-artifact@v7
         with:
           name: telegram-connection-public
           path: .cache/telegram-ready.json

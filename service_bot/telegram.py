@@ -18,6 +18,7 @@ class TelegramStatus:
     state: str = "not_configured"
     username: str | None = None
     message: str = "Telegram-токен не настроен. Сейчас доступно веб-демо."
+    bot_id: int | None = None
 
     def public_view(self) -> dict:
         return asdict(self)
@@ -123,7 +124,12 @@ class TelegramBot:
                 ]
             },
         )
-        self.status = TelegramStatus("polling", username, "Telegram-бот подключён.")
+        self.status = TelegramStatus(
+            "polling",
+            username,
+            "Telegram-бот подключён.",
+            bot_id=me.get("id") if isinstance(me.get("id"), int) else None,
+        )
 
     def _menu(self, reply: Reply) -> dict:
         if reply.options:

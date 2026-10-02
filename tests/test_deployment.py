@@ -13,7 +13,7 @@ FAKE_TOKEN = "123456:fake_test_token_not_for_real_telegram"
 def response_handler(request):
     method = request.url.path.split("/")[-1]
     result = {
-        "getMe": {"username": "service_test_bot"},
+        "getMe": {"username": "service_test_bot", "id": 123456},
         "getWebhookInfo": {"url": ""},
         "getUpdates": [{"update_id": 1, "message": {"text": "private user text"}}],
     }.get(method, True)
@@ -32,6 +32,7 @@ def test_probe_outputs_only_public_metadata(engine):
             data = await probe_telegram(FAKE_TOKEN, engine, client=client)
             assert data["bot_url"] == "https://t.me/service_test_bot"
             assert data["status"] == "api_checked"
+            assert data["bot_id"] == 123456
             assert data["entry_count"] == 3
             assert FAKE_TOKEN not in json.dumps(data)
             assert "private user text" not in json.dumps(data)

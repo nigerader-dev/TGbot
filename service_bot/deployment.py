@@ -35,6 +35,7 @@ async def probe_telegram(
         return {
             "status": "api_checked",
             "username": bot.status.username,
+            "bot_id": bot.status.bot_id,
             "bot_url": f"https://t.me/{bot.status.username}",
             "checked_at": datetime.now(UTC).isoformat(),
             "knowledge_revision": engine.knowledge.document.revision,
