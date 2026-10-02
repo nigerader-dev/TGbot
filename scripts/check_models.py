@@ -10,9 +10,14 @@ Run:  python scripts/check_models.py
 from __future__ import annotations
 
 import os
+import socket
+import subprocess
 import sys
+from pathlib import Path
 
-import httpx
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import httpx  # noqa: E402
 
 from service_bot.ai import SYSTEM_PROMPT, knowledge_digest
 from service_bot.knowledge import KnowledgeStore
@@ -21,6 +26,44 @@ from service_bot.llm import POLLINATIONS_BASE_URL, resolve_llm_config
 GITHUB_MODELS_BASE = "https://models.github.ai/inference"
 TOKEN_VARS = ("GH_MODELS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")
 PREVIEW = 200
+
+
+def dns_note() -> None:
+    for host in ("models.github.ai", "text.pollinations.ai"):
+        try:
+            print(f"dns: {host} -> {socket.gethostbyname(host)}")
+        except OSError as exc:
+            print(f"dns: {host} ERROR {type(exc).__name__}")
+
+
+def curl_probe(token: str, model: str) -> None:
+    """Same call as the GitHub documentation example, but through curl."""
+    command = [
+        "curl",
+        "-sS",
+        "-o",
+        "/dev/stderr",
+        "-w",
+        "curl: HTTP %{http_code} size %{size_download}\n",
+        f"{GITHUB_MODELS_BASE}/chat/completions",
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        "Authorization: Bearer <token>",
+        "-d",
+        f'{{"messages":[{{"role":"user","content":"ответь одним словом: ок"}}],"model":"{model}"}}',
+    ]
+    command = [
+        part.replace("<token>", token) if part == "Authorization: Bearer <token>" else part
+        for part in command
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=45, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"curl: ERROR {type(exc).__name__}")
+        return
+    print(f"curl stdout: {result.stdout.strip()[:120]!r}")
+    print(f"curl stderr: {' '.join(result.stderr.split())[:200]!r}")
 
 
 def find_token() -> str:
