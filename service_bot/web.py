@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from .ai import AIAssistant
 from .engine import AnswerEngine
 from .knowledge import DEFAULT_KNOWLEDGE_PATH, KnowledgeStore
-from .llm import LLMRouter, resolve_llm_config
+from .llm import LLMRouter, resolve_llm_configs
 from .telegram import TelegramBot, TelegramStatus
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -41,10 +41,16 @@ def build_assistant(
     env: dict | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> AIAssistant:
-    """Wire the optional LLM layer. Without a provider the rule engine answers."""
-    config = resolve_llm_config(env)
-    router = LLMRouter(config, client=client) if config else None
-    return AIAssistant(AnswerEngine(knowledge), router=router, config=config)
+    """Wire the optional LLM chain. Without a provider the rule engine answers."""
+    configs = resolve_llm_configs(env)
+    routers = [LLMRouter(config, client=client) for config in configs]
+    return AIAssistant(
+        AnswerEngine(knowledge),
+        router=routers[0] if routers else None,
+        config=configs[0] if configs else None,
+        fallback_routers=routers[1:],
+        fallback_configs=configs[1:],
+    )
 
 
 def create_app(

@@ -16,7 +16,7 @@ from .ai import AIAssistant, knowledge_digest
 from .deployment import probe_telegram, run_telegram
 from .engine import AnswerEngine
 from .knowledge import DEFAULT_KNOWLEDGE_PATH, ROOT, KnowledgeStore
-from .llm import LLMRouter, resolve_llm_config
+from .llm import LLMRouter, resolve_llm_configs
 from .telegram import TelegramBot, TelegramFailure
 from .web import create_app
 
@@ -32,9 +32,16 @@ PROBE_QUESTIONS = (
 
 
 def build_assistant(knowledge: KnowledgeStore) -> AIAssistant:
-    config = resolve_llm_config(os.environ)
-    router = LLMRouter(config) if config else None
-    return AIAssistant(AnswerEngine(knowledge), router=router, config=config)
+    """Wire the AI chain: the first provider that answers wins, rules answer last."""
+    configs = resolve_llm_configs(os.environ)
+    routers = [LLMRouter(config) for config in configs]
+    return AIAssistant(
+        AnswerEngine(knowledge),
+        router=routers[0] if routers else None,
+        config=configs[0] if configs else None,
+        fallback_routers=routers[1:],
+        fallback_configs=configs[1:],
+    )
 
 
 async def session_with_close(
@@ -63,7 +70,7 @@ async def _run_ai_check(knowledge: KnowledgeStore, assistant: AIAssistant) -> in
             file=sys.stderr,
         )
         return 3
-    print(f"Провайдер: {assistant.config.provider}, модель: {assistant.config.model}")
+    print(f"Провайдеры: {assistant.model_label}")
     print(f"Записей в базе: {len(knowledge.entries)}, версия: {knowledge.document.revision}")
     answered_by_model = 0
     for index, question in enumerate(PROBE_QUESTIONS):
@@ -79,11 +86,11 @@ async def _run_ai_check(knowledge: KnowledgeStore, assistant: AIAssistant) -> in
             f"- {question!r}: status={reply.status}, entry_id={reply.entry_id}, "
             f"layer={layer}, action={meta.get('action')}, latency_ms={meta.get('latency_ms')}"
         )
-    router = assistant.router
-    if router is not None:
+    for index, router in enumerate(assistant.routers):
+        config = router.config
         print(
-            f"Модель: state={router.state}, calls={router.calls}, "
-            f"ответов={router.answered}, уточнений={router.clarified}, "
+            f"Модель {index + 1} ({config.provider}/{config.model}): state={router.state}, "
+            f"calls={router.calls}, ответов={router.answered}, уточнений={router.clarified}, "
             f"отказов={router.no_answer}, резерв={router.fallbacks}, "
             f"last_error={router.last_error or 'нет'}, "
             f"detail={router.last_error_detail or 'нет'!r}"

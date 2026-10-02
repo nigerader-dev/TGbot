@@ -11,6 +11,7 @@ answers instead and the client still receives either a verified answer or an hon
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 
 from .engine import AnswerEngine, Decision, Reply, ai_metadata
@@ -90,9 +91,13 @@ class AIAssistant:
         *,
         router: LLMRouter | None = None,
         config: LLMConfig | None = None,
+        fallback_routers: Sequence[LLMRouter] = (),
+        fallback_configs: Sequence[LLMConfig] = (),
     ):
         self.engine = engine
         self.knowledge = engine.knowledge
+        self.routers = ([router] if router is not None else []) + list(fallback_routers)
+        self.configs = ([config] if config is not None else []) + list(fallback_configs)
         self.router = router
         self.config = config if config is not None else (router.config if router else None)
         self.system_prompt = SYSTEM_PROMPT.format(digest=knowledge_digest(self.knowledge))
@@ -108,13 +113,13 @@ class AIAssistant:
 
     @property
     def enabled(self) -> bool:
-        return self.router is not None
+        return bool(self.routers)
 
     @property
     def model_label(self) -> str:
-        if self.config is None:
+        if not self.configs:
             return "детерминированные правила базы знаний"
-        return f"{self.config.provider}/{self.config.model}"
+        return " → ".join(f"{config.provider}/{config.model}" for config in self.configs)
 
     def status(self) -> dict:
         return {
@@ -123,12 +128,13 @@ class AIAssistant:
             "model_label": self.model_label,
             "routed": self.routed,
             "rule_replies": self.rule_replies,
-            "router": self.router.public_view() if self.router else None,
+            "router": self.routers[0].public_view() if self.routers else None,
+            "routers": [router.public_view() for router in self.routers],
         }
 
     async def aclose(self) -> None:
-        if self.router is not None:
-            await self.router.aclose()
+        for router in self.routers:
+            await router.aclose()
 
     # -- conversation -------------------------------------------------------
 
@@ -137,21 +143,37 @@ class AIAssistant:
         if status is not None:
             return status
         decision = self.engine.decision(text, session_id)
-        if self.router is None or decision.blocked:
+        if not self.routers or decision.blocked:
             self.rule_replies += 1
             return replace(
                 decision.reply,
                 ai=ai_metadata(layer="rules", config=self.config, note=decision.reply.reason),
             )
         self.routed += 1
-        verdict = await self.router.route(
-            system=self.system_prompt,
-            user=self._user_prompt(text, decision.context),
-        )
-        return self._resolve(text, decision, verdict)
+        verdict, config = await self._ask_model(text, decision)
+        return self._resolve(text, decision, verdict, config)
 
-    def _resolve(self, question: str, decision: Decision, verdict: RouteVerdict | None) -> Reply:
-        config = self.config
+    async def _ask_model(
+        self, text: str, decision: Decision
+    ) -> tuple[RouteVerdict | None, LLMConfig | None]:
+        """Ask the providers in order; the first usable verdict wins."""
+        user = self._user_prompt(text, decision.context)
+        for index, router in enumerate(self.routers):
+            verdict = await router.route(system=self.system_prompt, user=user)
+            if verdict is not None:
+                config = self.configs[index] if index < len(self.configs) else router.config
+                return verdict, config
+        return None, self.config
+
+    def _resolve(
+        self,
+        question: str,
+        decision: Decision,
+        verdict: RouteVerdict | None,
+        config: LLMConfig | None = None,
+    ) -> Reply:
+        if config is None:
+            config = self.config
         rule_note = decision.reply.reason
         if verdict is None:
             return replace(
@@ -247,17 +269,19 @@ class AIAssistant:
             f"Режим: {self.model_label} + ответы только из базы знаний.",
             f"Записей в базе: {len(self.knowledge.entries)}, версия: {revision}.",
         ]
-        if self.router is not None:
-            state = self.router.state
+        if self.routers:
+            calls = sum(router.calls for router in self.routers)
+            answered = sum(router.answered for router in self.routers)
+            refused = sum(router.no_answer for router in self.routers)
             text_out.append(
-                "Модель опрошена: "
-                f"{self.router.calls} раз, ответов из базы: {self.router.answered}, "
-                f"отказов: {self.router.no_answer}."
+                f"Модель опрошена: {calls} раз, ответов из базы: {answered}, отказов: {refused}."
             )
-            if state == "cooling_down":
-                text_out.append("Модель временно недоступна — отвечают только правила базы знаний.")
-            elif self.router.last_error:
-                text_out.append("Последняя ошибка модели: временный сбой, работает резерв.")
+            if self.model_label != self.model_label.split(" → ")[0]:
+                text_out.append("Провайдеры по очереди: " + self.model_label + ".")
+            if all(router.state != "ready" for router in self.routers):
+                text_out.append("Все модели временно недоступны — отвечают правила базы знаний.")
+            elif any(router.last_error for router in self.routers):
+                text_out.append("Часть моделей временно недоступна, работает резерв.")
         else:
             text_out.append("Внешняя ИИ-модель не настроена: отвечают только правила базы знаний.")
         return self.engine.info_reply("\n".join(text_out), "status")

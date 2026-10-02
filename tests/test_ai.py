@@ -255,3 +255,80 @@ def test_rules_only_assistant_marks_replies_as_rules(knowledge):
     assert assistant.status()["mode"] == "rules_only"
     assert assistant.enabled is False
     assert KnowledgeStore.load().entries["kan_ultra_maintenance"].answer == reply.text
+
+
+def test_the_chain_falls_through_to_the_next_provider(engine, knowledge):
+    """The first provider is down, the second answers: the layer is still llm."""
+
+    def failing(request):
+        return httpx.Response(503, json={"error": {"message": "unavailable"}})
+
+    def working(request):
+        payload = json.loads(request.content)
+        verdict = by_keyword(payload["messages"][-1]["content"])
+        content = json.dumps(verdict, ensure_ascii=False)
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    primary = LLMConfig(
+        provider="github",
+        base_url="https://models.github.ai/inference",
+        model=MODEL,
+        api_key=FAKE_KEY,
+        retries=0,
+    )
+    secondary = LLMConfig(
+        provider="llm7",
+        base_url="https://api.llm7.io/v1",
+        model="GLM-5.3-Flash",
+        api_key="",
+        retries=0,
+        needs_key=False,
+    )
+    assistant = AIAssistant(
+        engine,
+        router=LLMRouter(primary, client=httpx.AsyncClient(transport=httpx.MockTransport(failing))),
+        config=primary,
+        fallback_routers=[
+            LLMRouter(secondary, client=httpx.AsyncClient(transport=httpx.MockTransport(working)))
+        ],
+        fallback_configs=[secondary],
+    )
+    reply = ask(assistant, "Как почистить КАН Ультра?")
+    assert reply.status == "answer"
+    assert reply.text == knowledge.entries["kan_ultra_maintenance"].answer
+    assert reply.ai["layer"] == "llm"
+    assert reply.ai["provider"] == "llm7"
+    assert reply.ai["model"] == "GLM-5.3-Flash"
+
+
+def test_status_describes_the_provider_chain_without_secrets(engine):
+    primary = LLMConfig(
+        provider="github",
+        base_url="https://models.github.ai/inference",
+        model=MODEL,
+        api_key=FAKE_KEY,
+        retries=0,
+    )
+    secondary = LLMConfig(
+        provider="llm7",
+        base_url="https://api.llm7.io/v1",
+        model="GLM-5.3-Flash",
+        api_key="",
+        retries=0,
+        needs_key=False,
+    )
+    assistant = AIAssistant(
+        engine,
+        router=LLMRouter(primary),
+        config=primary,
+        fallback_routers=[LLMRouter(secondary)],
+        fallback_configs=[secondary],
+    )
+    status = assistant.status()
+    assert status["enabled"] is True
+    assert status["model_label"] == f"github/{MODEL} → llm7/GLM-5.3-Flash"
+    assert [view["provider"] for view in status["routers"]] == ["github", "llm7"]
+    assert FAKE_KEY not in json.dumps(status, ensure_ascii=False)
+    reply = ask(assistant, "/status")
+    assert FAKE_KEY not in reply.text
+    assert "llm7/GLM-5.3-Flash" in reply.text

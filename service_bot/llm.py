@@ -141,26 +141,50 @@ def _first_env(env: Mapping[str, str], names: tuple[str, ...]) -> str:
     return ""
 
 
+KEYLESS_FALLBACKS = ("llm7", "pollinations")
+
+
 def resolve_llm_config(env: Mapping[str, str] | None = None) -> LLMConfig | None:
-    """Select a provider from the environment. Returns None when the AI layer is off.
+    """The first configured provider; None means the AI layer is off."""
+    configs = resolve_llm_configs(env)
+    return configs[0] if configs else None
+
+
+def resolve_llm_configs(env: Mapping[str, str] | None = None) -> list[LLMConfig]:
+    """Providers to try in order. ``auto`` builds a best-effort chain.
 
     Order for ``LLM_PROVIDER=auto`` (default): explicit key -> GitHub token
     (GitHub Models, free with a workflow ``models: read`` permission) -> keyless
-    community endpoint used only as a best-effort demo.
+    community endpoints used only as a best-effort demo. The first provider that
+    answers wins; the rest stay as transparent fallbacks.
     """
     environment = os.environ if env is None else env
     provider = (environment.get("LLM_PROVIDER") or "auto").strip().lower()
     if provider in DISABLED_VALUES or (
         environment.get("AI_ENABLED", "").strip().lower() in DISABLED_VALUES - {""}
     ):
-        return None
-    if provider == "auto":
-        if _first_env(environment, ("LLM_API_KEY", "OPENAI_API_KEY")):
-            provider = "openai"
-        elif _first_env(environment, ("GH_MODELS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")):
-            provider = "github"
-        else:
-            provider = "llm7"
+        return []
+    configs: list[LLMConfig] = []
+    for name in _provider_chain(environment, provider):
+        config = _config_for(environment, name)
+        if config is not None:
+            configs.append(config)
+    return configs
+
+
+def _provider_chain(environment: Mapping[str, str], provider: str) -> list[str]:
+    if provider != "auto":
+        return [provider]
+    chain: list[str] = []
+    if _first_env(environment, ("LLM_API_KEY", "OPENAI_API_KEY")):
+        chain.append("openai")
+    if _first_env(environment, ("GH_MODELS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")):
+        chain.append("github")
+    chain.extend(name for name in KEYLESS_FALLBACKS if name not in chain)
+    return chain
+
+
+def _config_for(environment: Mapping[str, str], provider: str) -> LLMConfig | None:
     preset = PRESETS.get(provider)
     if preset is None:
         return None

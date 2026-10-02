@@ -9,6 +9,7 @@ from service_bot.llm import (
     LLMRouter,
     parse_verdict,
     resolve_llm_config,
+    resolve_llm_configs,
 )
 
 FAKE_KEY = "sk-test-key-must-never-be-published"
@@ -62,6 +63,25 @@ def test_auto_without_credentials_uses_the_keyless_demo_endpoint():
     assert resolved.model == "GLM-5.3-Flash"
     assert resolved.api_key == ""
     assert resolved.needs_key is False
+
+
+def test_auto_builds_a_chain_and_keeps_free_providers_as_fallbacks():
+    from_token = resolve_llm_configs({"GH_MODELS_TOKEN": "ghs_example"})
+    assert [config.provider for config in from_token] == ["github", "llm7", "pollinations"]
+    with_key = resolve_llm_configs({"LLM_API_KEY": FAKE_KEY, "GH_MODELS_TOKEN": "ghs_example"})
+    assert [config.provider for config in with_key] == [
+        "openai",
+        "github",
+        "llm7",
+        "pollinations",
+    ]
+    assert resolve_llm_config({"LLM_PROVIDER": "llm7"}).provider == "llm7"
+
+
+def test_an_explicit_provider_or_a_disabled_layer_has_no_chain():
+    assert [config.provider for config in resolve_llm_configs({"LLM_PROVIDER": "llm7"})] == ["llm7"]
+    assert resolve_llm_configs({"AI_ENABLED": "0", "LLM_API_KEY": FAKE_KEY}) == []
+    assert resolve_llm_configs({"LLM_PROVIDER": "unknown"}) == []
 
 
 def test_pollinations_stays_available_as_a_keyless_fallback():
