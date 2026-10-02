@@ -61,11 +61,20 @@
 
 | Провайдер | Как включить | Что используется по умолчанию |
 | --- | --- | --- |
-| GitHub Models (бесплатно, без отдельного ключа) | в Actions: `permissions: models: read` и `GH_MODELS_TOKEN: ${{ github.token }}` | `openai/gpt-4o-mini` |
-| OpenAI-совместимый API | `LLM_API_KEY` (+ `LLM_BASE_URL`, `LLM_MODEL`) | `https://api.openai.com/v1`, `gpt-4o-mini` |
+| Бесплатный внешний шлюз llm7.io (по умолчанию в этом репозитории) | ничего: `LLM_PROVIDER` по умолчанию `llm7` | `GLM-5.3-Flash`, ключ не нужен |
+| GitHub Models (бесплатно с токеном Actions) | `LLM_PROVIDER=github` + `GH_MODELS_TOKEN` (в Actions это `${{ github.token }}` с `permissions: models: read`) | `openai/gpt-4o-mini` |
+| OpenAI-совместимый API | `LLM_API_KEY` (+ `LLM_BASE_URL`, `LLM_MODEL`), `auto` выберет его первым | `https://api.openai.com/v1`, `gpt-4o-mini` |
 | OpenRouter / Groq / DeepSeek / Mistral / Gemini | `LLM_PROVIDER=openrouter|groq|deepseek|mistral|gemini` + ключ | маленькая модель провайдера |
 | Локальная модель (Ollama, LM Studio) | `LLM_PROVIDER=ollama` | `http://127.0.0.1:11434/v1`, `llama3.2` |
+| Резервный keyless-вариант | `LLM_PROVIDER=pollinations` | `openai` (в CI отвечал 402, оставлен как запасной) |
 | Без ИИ вообще | `AI_ENABLED=0` | отвечают только правила базы |
+
+Проверено в GitHub Actions: keyless `llm7` отвечает, `models.github.ai` в этом
+окружении отдаёт заглушку `200 text/plain`, поэтому ИИ-слой там уходит в резерв и
+ответы формируют правила базы. Модель может быть заменена на корпоративный шлюз:
+для этого достаточно `LLM_PROVIDER=custom`, `LLM_BASE_URL`, `LLM_MODEL` и секрета
+`LLM_API_KEY`. Внешние бесплатные шлюзы не дают SLA и видят текст вопроса клиента —
+для эксплуатации лучше свой ключ или локальная модель.
 
 Полный список и значения по умолчанию — `.env.example` и `resolve_llm_config()`.
 Проверить подключение можно командой:
@@ -206,9 +215,9 @@ python -m service_bot serve --host 0.0.0.0 --port 8000
 
 - **`.github/workflows/telegram-host.yml` — постоянная работа (после мержа в `main`).**
   Каждые 6 часов запускается один polling-процесс на 5ч45м, следующий запуск
-  поднимает бота сразу после предыдущего. ИИ-слой работает через бесплатные
-  GitHub Models: `permissions: models: read` + `GH_MODELS_TOKEN: ${{ github.token }}`,
-  отдельный ключ не нужен.
+  поднимает бота сразу после предыдущего. ИИ-слой включён по умолчанию на бесплатном
+  keyless-шлюзе `llm7`; провайдер меняется переменной репозитория `LLM_PROVIDER`,
+  ключ (если нужен) хранится в секрете `LLM_API_KEY`.
 - **`.github/workflows/telegram-demo.yml` — приёмочная живая сессия** на 5–348 минут
   по кнопке *Run workflow* (или автоматически при push в рабочую ветку).
 - Оба workflow используют одну concurrency-группу, поэтому два polling-процесса

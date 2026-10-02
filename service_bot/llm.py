@@ -235,7 +235,7 @@ def _first_json_object(text: str) -> dict | None:
     return None
 
 
-def _retry_after(response: httpx.Response, default: float = 1.0, cap: float = 5.0) -> float:
+def _retry_after(response: httpx.Response, default: float = 1.0, cap: float = 8.0) -> float:
     """Seconds the endpoint asks us to wait; free tiers send this with HTTP 429."""
     raw: Any = response.headers.get("retry-after")
     if not raw:
@@ -312,7 +312,7 @@ class LLMRouter:
 
     FAILURE_THRESHOLD = 3
 
-    RATE_LIMIT_PAUSE = 20.0
+    RATE_LIMIT_PAUSE = 15.0
     RETRY_BACKOFF = 0.5
 
     def __init__(

@@ -20,6 +20,7 @@ from .llm import LLMRouter, resolve_llm_config
 from .telegram import TelegramBot, TelegramFailure
 from .web import create_app
 
+AI_CHECK_PAUSE = 1.5
 MAX_AI_CHECK_DURATION = 21600
 PROBE_QUESTIONS = (
     "Как почистить КАН Ультра?",
@@ -65,7 +66,10 @@ async def _run_ai_check(knowledge: KnowledgeStore, assistant: AIAssistant) -> in
     print(f"Провайдер: {assistant.config.provider}, модель: {assistant.config.model}")
     print(f"Записей в базе: {len(knowledge.entries)}, версия: {knowledge.document.revision}")
     answered_by_model = 0
-    for question in PROBE_QUESTIONS:
+    for index, question in enumerate(PROBE_QUESTIONS):
+        if index and assistant.enabled:
+            # Free tiers allow roughly one request per second: do not trip the limiter.
+            await asyncio.sleep(AI_CHECK_PAUSE)
         reply = await assistant.respond(question, "ai-check")
         meta = reply.ai or {}
         layer = meta.get("layer")

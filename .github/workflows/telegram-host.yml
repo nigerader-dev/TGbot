@@ -57,8 +57,9 @@ jobs:
       - name: Check the AI layer
         continue-on-error: true
         run: |
-          python -m service_bot ai-check > "$RUNNER_TEMP/ai-check.txt" 2>&1 || true
-          if grep -q "нет ответов модели\|модель не дала решений" "$RUNNER_TEMP/ai-check.txt"; then
+          if python -m service_bot ai-check > "$RUNNER_TEMP/ai-check.txt" 2>&1; then
+            echo "::notice title=AI layer::model answered from the knowledge base"
+          else
             python scripts/check_models.py >> "$RUNNER_TEMP/ai-check.txt" 2>&1 || true
           fi
           cat "$RUNNER_TEMP/ai-check.txt"
