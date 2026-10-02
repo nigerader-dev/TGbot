@@ -203,6 +203,61 @@ def test_router_sends_the_expected_payload_and_reads_the_verdict():
     asyncio.run(router.aclose())
 
 
+def test_rate_limit_is_respected_and_retried_after_the_requested_pause():
+    calls = []
+    slept = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(
+                429,
+                json={
+                    "error": {
+                        "message": "Rate limit exceeded. Retry after 1 seconds.",
+                        "retry_after": 1,
+                    }
+                },
+                headers={"retry-after": "1"},
+            )
+        return completion('{"action":"answer","entry_id":"kit_frequency"}')
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    router = LLMRouter(config(retries=1), client=client, sleep=fake_sleep)
+    verdict = route(router)
+    assert verdict is not None
+    assert verdict.entry_id == "kit_frequency"
+    assert slept == [1.0]
+    assert router.answered == 1
+    assert router.last_error is None
+    asyncio.run(router.aclose())
+
+
+def test_persistent_rate_limit_pauses_the_model_without_killing_it():
+    clock = {"now": 0.0}
+
+    def handler(request):
+        return httpx.Response(429, json={"error": {"message": "slow down"}})
+
+    async def fake_sleep(seconds):  # pragma: no cover - the pause is asserted via the clock
+        raise AssertionError("the last attempt must not sleep")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    router = LLMRouter(
+        config(retries=0, cooldown=300), client=client, clock=lambda: clock["now"], sleep=fake_sleep
+    )
+    assert route(router) is None
+    assert router.last_error == "http_429"
+    assert router.state == "cooling_down"
+    clock["now"] = 21.0  # short pause: the free tier allows one request per second again
+    assert router.state == "ready"
+    assert router._disabled_until < 300.0
+    asyncio.run(router.aclose())
+
+
 def test_router_retries_server_errors_then_succeeds():
     calls = []
 

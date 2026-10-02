@@ -7,6 +7,7 @@ against the knowledge base. The API key never leaves the process and is never lo
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -234,6 +235,21 @@ def _first_json_object(text: str) -> dict | None:
     return None
 
 
+def _retry_after(response: httpx.Response, default: float = 1.0, cap: float = 5.0) -> float:
+    """Seconds the endpoint asks us to wait; free tiers send this with HTTP 429."""
+    raw: Any = response.headers.get("retry-after")
+    if not raw:
+        try:
+            payload = response.json()
+            raw = payload.get("retry_after") or payload.get("error", {}).get("retry_after")
+        except (ValueError, AttributeError, TypeError):
+            raw = None
+    try:
+        return min(max(float(raw), 0.0), cap)
+    except (TypeError, ValueError):
+        return default
+
+
 def _last_json_object(text: str) -> dict | None:
     """Return the last balanced JSON object: free models often explain, then decide."""
     found: dict | None = None
@@ -296,16 +312,21 @@ class LLMRouter:
 
     FAILURE_THRESHOLD = 3
 
+    RATE_LIMIT_PAUSE = 20.0
+    RETRY_BACKOFF = 0.5
+
     def __init__(
         self,
         config: LLMConfig,
         *,
         client: httpx.AsyncClient | None = None,
         clock=time.monotonic,
+        sleep=None,
     ):
         self.config = config
         self._client = client
         self._clock = clock
+        self._sleep = sleep or asyncio.sleep
         self._failures = 0
         self._format_failures = 0
         self._disabled_until = 0.0
@@ -390,6 +411,13 @@ class LLMRouter:
             self._disabled_until = self._clock() + min(self.config.cooldown, 60.0)
             self._format_failures = 0
 
+    def _record_rate_limit(self, detail: str | None = None) -> None:
+        """A rate limit is not a dead endpoint: wait a little and try the model again."""
+        self.last_error = "http_429"
+        self.last_error_detail = self._sanitize(detail) if detail else None
+        self._disabled_until = self._clock() + min(self.config.cooldown, self.RATE_LIMIT_PAUSE)
+        self._failures = 0
+
     def _record_success(self, verdict: RouteVerdict) -> None:
         self._failures = 0
         self._format_failures = 0
@@ -430,12 +458,18 @@ class LLMRouter:
                 if attempt == self.config.retries:
                     break
                 continue
+            if response.status_code == 429:
+                if attempt < self.config.retries:
+                    await self._sleep(_retry_after(response))
+                    continue
+                self._record_rate_limit(response.text)
+                break
             if response.status_code >= 400:
                 kind = f"http_{response.status_code}"
                 self._record_failure(kind, response.text)
-                if response.status_code == 429 or response.status_code >= 500:
-                    if attempt < self.config.retries:
-                        continue
+                if response.status_code >= 500 and attempt < self.config.retries:
+                    await self._sleep(self.RETRY_BACKOFF)
+                    continue
                 break
             try:
                 message = response.json()["choices"][0]["message"]
