@@ -59,7 +59,7 @@ def test_auto_without_credentials_uses_the_keyless_demo_endpoint():
     assert resolved is not None
     assert resolved.provider == "pollinations"
     assert resolved.api_key == ""
-    assert "referrer" in resolved.extra_body
+    assert resolved.extra_body == {}  # keyless payload: some params trigger a paid path
 
 
 @pytest.mark.parametrize("value", ["0", "off", "false", "disabled"])

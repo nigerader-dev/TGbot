@@ -89,7 +89,6 @@ PRESETS: dict[str, ProviderPreset] = {
         (),
         False,
         json_mode=False,
-        extra_body={"referrer": "github.com/nigerader-dev/TGbot"},
     ),
     "custom": ProviderPreset("", "", ("LLM_API_KEY",), True),
 }

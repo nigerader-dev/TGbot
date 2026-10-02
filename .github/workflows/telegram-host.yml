@@ -29,9 +29,10 @@ jobs:
     timeout-minutes: 355
     env:
       DEMO_MINUTES: ${{ inputs.duration_minutes || '345' }}
-      # ИИ-слой: бесплатные GitHub Models принимают workflow-токен с правом models: read.
-      LLM_PROVIDER: github
-      LLM_MODEL: openai/gpt-4o-mini
+      # ИИ-слой: keyless-эндпоинт по умолчанию; переопределяется repository variable.
+      LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'pollinations' }}
+      LLM_MODEL: ${{ vars.LLM_MODEL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       GH_MODELS_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
@@ -53,7 +54,7 @@ jobs:
           fi
       - name: Validate the knowledge base
         run: python -m service_bot validate-kb
-      - name: Check the AI layer against GitHub Models
+      - name: Check the AI layer
         continue-on-error: true
         run: |
           python -m service_bot ai-check > "$RUNNER_TEMP/ai-check.txt" 2>&1 || true
