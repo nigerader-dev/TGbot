@@ -65,6 +65,7 @@ async def run_ai_check(knowledge: KnowledgeStore, assistant: AIAssistant) -> int
         "Проверка ИИ: модель не дала решений; "
         f"state={getattr(router, 'state', 'unknown')}, "
         f"last_error={getattr(router, 'last_error', None) or 'нет'}, "
+        f"detail={getattr(router, 'last_error_detail', None) or 'нет'!r}, "
         f"calls={getattr(router, 'calls', 0)}, fallbacks={getattr(router, 'fallbacks', 0)}. "
         "Бот продолжит отвечать на правилах базы знаний."
     )

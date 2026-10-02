@@ -276,6 +276,7 @@ class LLMRouter:
         self._failures = 0
         self._disabled_until = 0.0
         self.last_error: str | None = None
+        self.last_error_detail: str | None = None
         self.calls = 0
         self.answered = 0
         self.clarified = 0
@@ -287,6 +288,7 @@ class LLMRouter:
             **self.config.public_view(),
             "state": self.state,
             "last_error": self.last_error,
+            "last_error_detail": self.last_error_detail,
             "calls": self.calls,
             "verdicts": {
                 "answer": self.answered,
@@ -322,9 +324,17 @@ class LLMRouter:
         payload.update(self.config.extra_body)
         return payload
 
-    def _record_failure(self, kind: str) -> None:
+    def _sanitize(self, text: str) -> str:
+        """Short body preview for diagnostics; the key can never appear in it."""
+        clean = " ".join(text.split())
+        if self.config.api_key:
+            clean = clean.replace(self.config.api_key, "<hidden>")
+        return clean[:200]
+
+    def _record_failure(self, kind: str, detail: str | None = None) -> None:
         self._failures += 1
         self.last_error = kind
+        self.last_error_detail = self._sanitize(detail) if detail else None
         if self._failures >= self.FAILURE_THRESHOLD:
             self._disabled_until = self._clock() + self.config.cooldown
             self._failures = 0
@@ -333,6 +343,7 @@ class LLMRouter:
         self._failures = 0
         self._disabled_until = 0.0
         self.last_error = None
+        self.last_error_detail = None
         if verdict.action == "answer":
             self.answered += 1
         elif verdict.action == "clarify":
@@ -369,7 +380,7 @@ class LLMRouter:
                 continue
             if response.status_code >= 400:
                 kind = f"http_{response.status_code}"
-                self._record_failure(kind)
+                self._record_failure(kind, response.text)
                 if response.status_code == 429 or response.status_code >= 500:
                     if attempt < self.config.retries:
                         continue
@@ -378,11 +389,11 @@ class LLMRouter:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
             except (ValueError, KeyError, IndexError, TypeError):
-                self._record_failure("bad_response")
+                self._record_failure("bad_response", response.text)
                 break
             verdict = parse_verdict(content)
             if verdict is None:
-                self._record_failure("bad_verdict")
+                self._record_failure("bad_verdict", str(content))
                 break
             self._record_success(verdict)
             return RouteVerdict(
