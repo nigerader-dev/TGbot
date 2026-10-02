@@ -26,11 +26,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  live-test:
+  prepare:
+    name: Prepare and verify Telegram
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 5
     env:
       DEMO_MINUTES: ${{ inputs.duration_minutes || '15' }}
+    outputs:
+      bot_url: ${{ steps.connection.outputs.bot_url }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -59,12 +62,15 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: python -m service_bot probe-telegram --output .cache/telegram-ready.json
       - name: Publish public connection details
+        id: connection
         run: |
           python - <<'PY'
           import json, os
           from pathlib import Path
           data = json.loads(Path('.cache/telegram-ready.json').read_text())
           print('::notice title=Telegram API checked::' + json.dumps(data, ensure_ascii=True))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"bot_url={data['bot_url']}\n")
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write(f"## Telegram connection verified\n\n{data['bot_url']}\n\n")
               summary.write(f"Knowledge entries: {data['entry_count']}. Send `/start`.\n\n")
@@ -78,6 +84,31 @@ jobs:
           path: .cache/telegram-ready.json
           include-hidden-files: true
           retention-days: 1
+
+  live-test:
+    name: Manual live Telegram test
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      DEMO_MINUTES: ${{ inputs.duration_minutes || '15' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install runtime
+        run: pip install -r requirements.txt
+      - name: Show verified bot link
+        env:
+          BOT_URL: ${{ needs.prepare.outputs.bot_url }}
+        run: |
+          echo "## Manual live test" >> "$GITHUB_STEP_SUMMARY"
+          echo "$BOT_URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "Stops after $DEMO_MINUTES minutes. This is not permanent hosting." >> "$GITHUB_STEP_SUMMARY"
       - name: Manual live Telegram acceptance session
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
