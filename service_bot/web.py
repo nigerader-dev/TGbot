@@ -9,13 +9,16 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from .ai import AIAssistant
 from .engine import AnswerEngine
 from .knowledge import DEFAULT_KNOWLEDGE_PATH, KnowledgeStore
+from .llm import LLMRouter, resolve_llm_config
 from .telegram import TelegramBot, TelegramStatus
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -32,15 +35,32 @@ class SessionInput(BaseModel):
     session_id: UUID
 
 
+def build_assistant(
+    knowledge: KnowledgeStore,
+    *,
+    env: dict | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> AIAssistant:
+    """Wire the optional LLM layer. Without a provider the rule engine answers."""
+    config = resolve_llm_config(env)
+    router = LLMRouter(config, client=client) if config else None
+    return AIAssistant(AnswerEngine(knowledge), router=router, config=config)
+
+
 def create_app(
-    *, knowledge: KnowledgeStore | None = None, telegram_token: str | None = None
+    *,
+    knowledge: KnowledgeStore | None = None,
+    telegram_token: str | None = None,
+    assistant: AIAssistant | None = None,
 ) -> FastAPI:
     if knowledge is None:
         path = Path(os.getenv("KNOWLEDGE_BASE_PATH") or DEFAULT_KNOWLEDGE_PATH)
         knowledge = KnowledgeStore.load(path)
-    engine = AnswerEngine(knowledge)
+    if assistant is None:
+        assistant = build_assistant(knowledge)
+    engine = assistant.engine
     token = os.getenv("TELEGRAM_BOT_TOKEN", "") if telegram_token is None else telegram_token
-    bot = TelegramBot(token, engine) if token.strip() else None
+    bot = TelegramBot(token, assistant) if token.strip() else None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -50,9 +70,11 @@ def create_app(
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        await assistant.aclose()
 
     app = FastAPI(title="Сервисный помощник", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.state.engine = engine
+    app.state.assistant = assistant
     app.state.telegram = bot
 
     @app.middleware("http")
@@ -79,7 +101,11 @@ def create_app(
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "knowledge_revision": knowledge.document.revision}
+        return {
+            "status": "ok",
+            "knowledge_revision": knowledge.document.revision,
+            "ai_enabled": assistant.enabled,
+        }
 
     @app.get("/api/knowledge")
     async def get_knowledge():
@@ -93,11 +119,12 @@ def create_app(
             "knowledge_revision": knowledge.document.revision,
             "entry_count": len(knowledge.entries),
             "policy": "verbatim_knowledge_only",
+            "ai": assistant.status(),
         }
 
     @app.post("/api/chat")
     async def chat(data: ChatInput):
-        return engine.respond(data.text, f"web:{data.session_id}").to_dict()
+        return (await assistant.respond(data.text, f"web:{data.session_id}")).to_dict()
 
     @app.post("/api/reset")
     async def reset(data: SessionInput):

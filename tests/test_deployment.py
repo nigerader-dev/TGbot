@@ -20,7 +20,7 @@ def response_handler(request):
     return httpx.Response(200, json={"ok": True, "result": result})
 
 
-def test_probe_outputs_only_public_metadata(engine):
+def test_probe_outputs_only_public_metadata(assistant):
     requests = []
 
     def handler(request):
@@ -29,7 +29,7 @@ def test_probe_outputs_only_public_metadata(engine):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            data = await probe_telegram(FAKE_TOKEN, engine, client=client)
+            data = await probe_telegram(FAKE_TOKEN, assistant, client=client)
             assert data["bot_url"] == "https://t.me/service_test_bot"
             assert data["status"] == "api_checked"
             assert data["bot_id"] == 123456
@@ -45,7 +45,7 @@ def test_probe_outputs_only_public_metadata(engine):
     assert not any(r.url.path.endswith("/sendMessage") for r in requests)
 
 
-def test_probe_closes_its_client(engine, monkeypatch):
+def test_probe_closes_its_client(monkeypatch, assistant):
     original = httpx.AsyncClient
     clients = []
 
@@ -55,11 +55,11 @@ def test_probe_closes_its_client(engine, monkeypatch):
         return client
 
     monkeypatch.setattr(httpx, "AsyncClient", factory)
-    asyncio.run(probe_telegram(FAKE_TOKEN, engine))
+    asyncio.run(probe_telegram(FAKE_TOKEN, assistant))
     assert clients[0].is_closed
 
 
-def test_probe_rejects_bad_updates(engine):
+def test_probe_rejects_bad_updates(assistant):
     def handler(request):
         if request.url.path.endswith("/getUpdates"):
             return httpx.Response(200, json={"ok": True, "result": {"unexpected": "shape"}})
@@ -68,12 +68,12 @@ def test_probe_rejects_bad_updates(engine):
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with pytest.raises(TelegramFailure, match="получение сообщений"):
-                await probe_telegram(FAKE_TOKEN, engine, client=client)
+                await probe_telegram(FAKE_TOKEN, assistant, client=client)
 
     asyncio.run(scenario())
 
 
-def test_probe_authentication_failure_is_safe(engine):
+def test_probe_authentication_failure_is_safe(assistant):
     async def scenario():
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(
@@ -81,7 +81,7 @@ def test_probe_authentication_failure_is_safe(engine):
             )
         ) as client:
             with pytest.raises(TelegramFailure) as error:
-                await probe_telegram(FAKE_TOKEN, engine, client=client)
+                await probe_telegram(FAKE_TOKEN, assistant, client=client)
             assert FAKE_TOKEN not in str(error.value)
 
     asyncio.run(scenario())

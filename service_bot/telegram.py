@@ -1,4 +1,8 @@
-"""Telegram Bot API adapter. Secrets and user text are never logged."""
+"""Telegram Bot API adapter. Secrets and user text are never logged.
+
+Text questions go through the shared AI assistant; buttons are only a convenience
+for clarifications and the welcome message, never a required input method.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,8 @@ from dataclasses import asdict, dataclass
 
 import httpx
 
-from .engine import AnswerEngine, Reply
+from .ai import AIAssistant
+from .engine import Reply
 
 TOKEN_FORMAT = re.compile(r"^[0-9]{5,20}:[A-Za-z0-9_-]{20,100}$")
 
@@ -41,10 +46,11 @@ class TelegramFailure(Exception):
 
 class TelegramBot:
     def __init__(
-        self, token: str, engine: AnswerEngine, *, client: httpx.AsyncClient | None = None
+        self, token: str, assistant: AIAssistant, *, client: httpx.AsyncClient | None = None
     ):
         self._token = token.strip()
-        self.engine = engine
+        self.assistant = assistant
+        self.engine = assistant.engine
         self._client = client
         self.status = TelegramStatus()
         self.offset = 0
@@ -120,6 +126,7 @@ class TelegramBot:
                 "commands": [
                     {"command": "start", "description": "Начать и показать примеры"},
                     {"command": "help", "description": "Что умеет помощник"},
+                    {"command": "status", "description": "Режим работы и версия базы"},
                     {"command": "reset", "description": "Сбросить модель станции"},
                 ]
             },
@@ -131,31 +138,34 @@ class TelegramBot:
             bot_id=me.get("id") if isinstance(me.get("id"), int) else None,
         )
 
-    def _menu(self, reply: Reply) -> dict:
+    def _menu(self, reply: Reply) -> dict | None:
+        """Buttons are optional shortcuts; every question can be asked as plain text."""
         if reply.options:
             buttons = [
                 [{"text": option["label"], "callback_data": f"station:{option['id']}"}]
                 for option in reply.options
             ]
-        else:
+        elif reply.status == "info" and reply.reason in {"welcome", "help"}:
             buttons = [
                 [{"text": entry.title, "callback_data": f"faq:{entry.id}"}]
                 for entry in self.engine.knowledge.document.entries
             ]
+        else:
+            return None
         buttons.append([{"text": "Сбросить контекст", "callback_data": "reset"}])
         return {"inline_keyboard": buttons}
 
     async def _send(self, chat_id: int, reply: Reply) -> None:
-        await self._call(
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": reply.text,
-                # Plain text: neither model names nor user messages can inject HTML/Markdown.
-                "link_preview_options": {"is_disabled": True},
-                "reply_markup": self._menu(reply),
-            },
-        )
+        payload = {
+            "chat_id": chat_id,
+            "text": reply.text,
+            # Plain text: neither model names nor user messages can inject HTML/Markdown.
+            "link_preview_options": {"is_disabled": True},
+        }
+        menu = self._menu(reply)
+        if menu is not None:
+            payload["reply_markup"] = menu
+        await self._call("sendMessage", payload)
 
     async def handle_update(self, update: dict) -> None:
         callback = update.get("callback_query")
@@ -181,12 +191,12 @@ class TelegramBot:
                 station = self.engine.knowledge.stations.get(data.removeprefix("station:"))
                 if station is None:
                     return
-                reply = self.engine.respond(station.name, session_id)
+                reply = await self.assistant.respond(station.name, session_id)
             elif data.startswith("faq:"):
                 entry = self.engine.knowledge.entries.get(data.removeprefix("faq:"))
                 if entry is None:
                     return
-                reply = self.engine.respond(entry.examples[0], session_id)
+                reply = await self.assistant.respond(entry.examples[0], session_id)
             else:
                 return
         else:
@@ -198,7 +208,7 @@ class TelegramBot:
                     "text_only",
                 )
             else:
-                reply = self.engine.respond(text, session_id)
+                reply = await self.assistant.respond(text, session_id)
         self._pending[update_id] = (chat_id, reply)
         await self._send(chat_id, reply)
         self._pending.pop(update_id, None)

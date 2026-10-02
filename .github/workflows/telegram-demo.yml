@@ -1,8 +1,12 @@
 name: Telegram - live acceptance test
 
+# Приёмочная проверка настоящего Bot API и живого диалога.
+# Постоянный хостинг выполняет telegram-host.yml; обе работы используют одну
+# concurrency-группу, поэтому два polling-процесса никогда не пересекаются.
+
 on:
   push:
-    branches: [arena/01a0fe03-tgbot]
+    branches: [arena/01a0fe4e-tgbot]
     paths:
       - 'service_bot/**'
       - 'knowledge/**'
@@ -13,25 +17,26 @@ on:
   workflow_dispatch:
     inputs:
       duration_minutes:
-        description: 'Duration of the manual live test (not permanent hosting)'
+        description: 'Длительность живой сессии в минутах'
         type: choice
-        options: ['5', '15', '30']
-        default: '15'
+        options: ['5', '15', '30', '60', '180', '348']
+        default: '60'
 
 permissions:
   contents: read
+  models: read
 
 concurrency:
-  group: telegram-live-test-${{ github.repository_id }}
+  group: telegram-bot-${{ github.repository_id }}
   cancel-in-progress: true
 
 jobs:
   prepare:
     name: Prepare and verify Telegram
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
-      DEMO_MINUTES: ${{ inputs.duration_minutes || '15' }}
+      DEMO_MINUTES: ${{ inputs.duration_minutes || '90' }}
     outputs:
       bot_url: ${{ steps.connection.outputs.bot_url }}
     steps:
@@ -57,6 +62,19 @@ jobs:
           ruff check .
           ruff format --check .
           pytest --cov=service_bot --cov-report=term-missing --cov-fail-under=90
+      - name: Verify the AI layer on GitHub Models
+        continue-on-error: true
+        env:
+          GH_MODELS_TOKEN: ${{ github.token }}
+        run: |
+          python -m service_bot ai-check > "$RUNNER_TEMP/ai-check.txt" 2>&1 || true
+          cat "$RUNNER_TEMP/ai-check.txt"
+          {
+            echo "## ИИ-слой (GitHub Models)"
+            echo '```'
+            cat "$RUNNER_TEMP/ai-check.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Verify real Telegram API
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -74,8 +92,8 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write(f"## Telegram connection verified\n\n{data['bot_url']}\n\n")
               summary.write(f"Knowledge entries: {data['entry_count']}. Send `/start`.\n\n")
-              summary.write(f"Manual live test: {os.environ['DEMO_MINUTES']} minutes. ")
-              summary.write("The bot stops after this test. GitHub Actions is not permanent hosting.\n")
+              summary.write(f"AI layer: {data['ai_model'] or 'выключен (только правила базы)'}.\n\n")
+              summary.write(f"Manual live test: {os.environ['DEMO_MINUTES']} minutes.\n")
           PY
       - name: Publish public readiness artifact
         uses: actions/upload-artifact@v7
@@ -89,9 +107,12 @@ jobs:
     name: Manual live Telegram test
     needs: prepare
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 355
     env:
-      DEMO_MINUTES: ${{ inputs.duration_minutes || '15' }}
+      DEMO_MINUTES: ${{ inputs.duration_minutes || '90' }}
+      LLM_PROVIDER: github
+      LLM_MODEL: openai/gpt-4o-mini
+      GH_MODELS_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -108,11 +129,12 @@ jobs:
         run: |
           echo "## Manual live test" >> "$GITHUB_STEP_SUMMARY"
           echo "$BOT_URL" >> "$GITHUB_STEP_SUMMARY"
-          echo "Stops after $DEMO_MINUTES minutes. This is not permanent hosting." >> "$GITHUB_STEP_SUMMARY"
+          echo "AI: GitHub Models (openai/gpt-4o-mini). If it is rate limited, answers fall back to the rules." >> "$GITHUB_STEP_SUMMARY"
+          echo "Stops after $DEMO_MINUTES minutes. This is a bounded acceptance session, not permanent hosting." >> "$GITHUB_STEP_SUMMARY"
       - name: Manual live Telegram acceptance session
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: python -m service_bot telegram --duration "$((DEMO_MINUTES * 60))"
       - name: End of live test
         if: always()
-        run: echo "The bounded test session has ended. Use a separate host for permanent operation." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "The bounded test session has ended. Use telegram-host.yml for scheduled operation." >> "$GITHUB_STEP_SUMMARY"

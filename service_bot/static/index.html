@@ -37,7 +37,7 @@
 </header>
 <main class="page">
   <section class="hero">
-    <div><p class="eyebrow"><span></span>ПОМОЩНИК СЕРВИСНОГО ОТДЕЛА</p><h1>Точные ответы.<br><span>Без догадок.</span></h1><p class="hero-description">Вопросы по обслуживанию станции — с ответами<br class="desktop-break"> только из предоставленной базы знаний.</p></div>
+    <div><p class="eyebrow"><span></span>ПОМОЩНИК СЕРВИСНОГО ОТДЕЛА</p><h1>Точные ответы.<br><span>Без догадок.</span></h1><p class="hero-description">Вопрос понимает небольшая ИИ-модель, а текст ответа<br class="desktop-break"> берётся из предоставленной базы знаний дословно.</p></div>
     <div class="policy-card"><span class="policy-icon"><svg><use href="#i-shield"/></svg></span><div><strong>Нет информации — нет выдумок</strong><p>Если ответа нет в базе, помощник честно<br class="desktop-break"> сообщит об этом и направит в сервисный отдел.</p></div></div>
   </section>
   <nav class="tabs" role="tablist" aria-label="Разделы прототипа">
@@ -54,7 +54,7 @@
         <button class="example" data-question="У меня переполнена станция. Что делать?"><span class="example-icon"><svg><use href="#i-alert"/></svg></span><span><strong>Станция переполнена</strong><small>Первые действия</small></span><svg class="example-arrow"><use href="#i-arrow"/></svg></button>
         <button class="example unknown-example" data-question="Как почистить станцию Тверь?"><span class="example-icon unknown-icon">?</span><span><strong>А что со станцией Тверь?</strong><small>Проверка: информации нет</small></span><svg class="example-arrow"><use href="#i-arrow"/></svg></button>
       </div>
-      <div class="sidebar-note"><svg><use href="#i-check"/></svg><p>Демо и Telegram используют<br><strong>один и тот же механизм ответов.</strong></p></div>
+      <div class="sidebar-note"><svg><use href="#i-check"/></svg><p>Демо и Telegram используют<br><strong>один и тот же механизм:</strong> модель выбирает запись,<br>текст берётся из базы.</p></div>
     </aside>
     <section class="chat-card" aria-label="Диалог с сервисным помощником">
       <div class="chat-header"><div class="assistant-avatar"><svg><use href="#i-wave"/></svg></div><div><h2>Сервисный помощник</h2><p><span class="status-dot"></span><span id="chat-status">Загружаем базу знаний</span></p></div><button class="icon-button" id="reset-chat" title="Новый диалог" aria-label="Новый диалог"><svg><use href="#i-reset"/></svg></button></div>
@@ -63,7 +63,7 @@
     </section>
   </section>
   <section id="panel-knowledge" class="knowledge-panel" role="tabpanel" aria-labelledby="tab-knowledge" hidden>
-    <div class="panel-heading"><div><p class="eyebrow muted">ЕДИНСТВЕННЫЙ ИСТОЧНИК ОТВЕТОВ</p><h2>Небольшая база. Проверенные сведения.</h2><p>Ниже — полное содержимое базы, а не сгенерированные пересказы.</p></div><span class="file-chip">knowledge/knowledge_base.json</span></div>
+    <div class="panel-heading"><div><p class="eyebrow muted">ЕДИНСТВЕННЫЙ ИСТОЧНИК ОТВЕТОВ</p><h2>Небольшая база. Проверенные сведения.</h2><p>Ниже — полное содержимое базы. ИИ-модель только выбирает подходящую запись, поэтому пересказов и дополнений нет.</p></div><span class="file-chip">knowledge/knowledge_base.json</span></div>
     <div class="knowledge-grid" id="knowledge-grid"></div>
     <div class="knowledge-note"><svg><use href="#i-book"/></svg><p>Новая информация добавляется в JSON-файл: модель, тема, утверждённый ответ и источник. После изменения запустите <code>python -m service_bot validate-kb</code>, тесты и перезапустите процесс. Подробный пример — в README.</p></div>
   </section>
@@ -73,8 +73,9 @@
     <div class="setup-steps">
       <article><span>01</span><div><h3>Создайте бота</h3><p>Откройте <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a>, выполните <code>/newbot</code> и получите токен.</p></div></article>
       <article><span>02</span><div><h3>Задайте токен локально</h3><p>Скопируйте <code>.env.example</code> в <code>.env</code> и заполните <code>TELEGRAM_BOT_TOKEN</code>. Файл исключён из Git. Не присылайте токен в чат.</p></div></article>
-      <article><span>03</span><div><h3>Перезапустите процесс</h3><p>Из корня репозитория выполните <code>python -m service_bot serve</code> в активированном виртуальном окружении. Запустятся веб-демо и Telegram polling. Для запуска только бота: <code>python -m service_bot telegram</code>. Не запускайте два polling-процесса с одним токеном.</p></div></article>
-      <article><span>04</span><div><h3>Проверьте живой диалог</h3><p>Откройте своего бота, отправьте <code>/start</code> и четыре тестовых вопроса. Для сброса выбранной модели используйте <code>/reset</code>.</p></div></article>
+      <article><span>03</span><div><h3>Включите ИИ-модель (необязательно)</h3><p>Без ключей работает бесплатная модель GitHub Models: добавьте в workflow <code>permissions: models: read</code> и передайте <code>GH_MODELS_TOKEN</code>. Для другого провайдера задайте <code>LLM_API_KEY</code>, <code>LLM_BASE_URL</code>, <code>LLM_MODEL</code>. Без настроек отвечают только правила базы — это не ошибка.</p></div></article>
+      <article><span>04</span><div><h3>Перезапустите процесс</h3><p>Из корня репозитория выполните <code>python -m service_bot serve</code> в активированном виртуальном окружении. Запустятся веб-демо и Telegram polling. Для запуска только бота: <code>python -m service_bot telegram</code>. Не запускайте два polling-процесса с одним токеном.</p></div></article>
+      <article><span>05</span><div><h3>Проверьте живой диалог</h3><p>Откройте своего бота, отправьте <code>/start</code> и четыре тестовых вопроса. Для сброса выбранной модели используйте <code>/reset</code>.</p></div></article>
     </div>
     <p class="setup-footnote">Телефон и адрес сервисного отдела не предоставлены. Помощник не выдумывает контакты.</p>
   </section>

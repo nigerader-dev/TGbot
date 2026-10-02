@@ -7,19 +7,19 @@ from datetime import UTC, datetime
 
 import httpx
 
-from .engine import AnswerEngine
+from .ai import AIAssistant
 from .telegram import TelegramBot, TelegramFailure
 
 
 async def probe_telegram(
-    token: str, engine: AnswerEngine, *, client: httpx.AsyncClient | None = None
+    token: str, assistant: AIAssistant, *, client: httpx.AsyncClient | None = None
 ) -> dict:
     """Check the real API; return only public metadata, never updates or credentials."""
     owns_client = client is None
     if client is None:
         client = httpx.AsyncClient(timeout=httpx.Timeout(15, connect=10))
     try:
-        bot = TelegramBot(token, engine, client=client)
+        bot = TelegramBot(token, assistant, client=client)
         await bot.initialize()
         updates = await bot._call(
             "getUpdates",
@@ -38,8 +38,10 @@ async def probe_telegram(
             "bot_id": bot.status.bot_id,
             "bot_url": f"https://t.me/{bot.status.username}",
             "checked_at": datetime.now(UTC).isoformat(),
-            "knowledge_revision": engine.knowledge.document.revision,
-            "entry_count": len(engine.knowledge.entries),
+            "knowledge_revision": assistant.knowledge.document.revision,
+            "entry_count": len(assistant.knowledge.entries),
+            "ai_enabled": assistant.enabled,
+            "ai_model": assistant.model_label if assistant.enabled else None,
         }
     finally:
         if owns_client:

@@ -76,6 +76,13 @@ function addMessage(text, type = 'info', response = null) {
     source.append(icon('book'), document.createTextNode(response.source.label));
     message.append(source);
   }
+  const aiLine = describeAi(response?.ai);
+  if (aiLine) {
+    const line = document.createElement('div');
+    line.className = 'message-ai';
+    line.append(icon('wave'), document.createTextNode(aiLine));
+    message.append(line);
+  }
   if (response?.options?.length) {
     const options = document.createElement('div');
     options.className = 'clarification-options';
@@ -91,6 +98,20 @@ function addMessage(text, type = 'info', response = null) {
   messages.append(message);
   messages.scrollTop = messages.scrollHeight;
   return message;
+}
+
+function describeAi(ai) {
+  if (!ai) return '';
+  const model = ai.model ? `ИИ-модель ${ai.model}` : 'ИИ-модель';
+  if (ai.layer === 'llm') {
+    if (ai.action === 'answer') return `${model}: выбрана запись базы «${ai.entry_id}»`;
+    if (ai.action === 'clarify') return `${model}: нужно уточнить модель станции`;
+    if (ai.action === 'no_answer') return `${model}: информации в базе нет`;
+    return `${model}: запрос обработан`;
+  }
+  if (ai.layer === 'rules_guard') return 'Выбор модели отклонён проверкой базы — ответ из проверенной записи';
+  if (ai.layer === 'rules_fallback') return 'ИИ-модель недоступна — ответ проверен правилами базы';
+  return '';
 }
 
 function setBusy(value) {
@@ -184,7 +205,11 @@ async function refreshStatus() {
     const status = await api('/api/status');
     const connected = status.telegram.state === 'polling';
     $('#live-badge').lastChild.textContent = connected ? 'Telegram подключён' : 'Веб-демо работает';
-    $('#chat-status').textContent = `База знаний · ${status.entry_count} ${entryWord(status.entry_count)}`;
+    const ai = status.ai || {};
+    const base = `база · ${status.entry_count} ${entryWord(status.entry_count)}`;
+    $('#chat-status').textContent = ai.enabled
+      ? `${ai.router?.model || ai.model_label} · ${base}`
+      : `без ИИ-модели · ${base}`;
     $('#entry-count').textContent = status.entry_count;
     const names = {not_configured: 'Токен не настроен', starting: 'Подключаемся к Telegram',
       polling: 'Бот подключён', retrying: 'Повторяем подключение', error: 'Не удалось подключиться',
