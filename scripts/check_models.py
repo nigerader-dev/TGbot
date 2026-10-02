@@ -103,57 +103,72 @@ def environment_note(token: str) -> None:
         print(f"curl: ERROR {type(exc).__name__}")
 
 
-def probe_keyless() -> bool:
-    """Best-effort keyless community endpoints; used only for the demo."""
-    found = probe(
-        "https://api.llm7.io/v1/chat/completions",
-        {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "ответь: ок"}]},
-        {"Content-Type": "application/json"},
-        "llm7.io",
-    )[0]
-    try:
-        status = httpx.get(
-            "https://duckduckgo.com/duckchat/v1/status",
-            headers={"x-vqd-accept": "1", "User-Agent": "Mozilla/5.0"},
-            timeout=25,
-        )
-        print(f"duckduckgo: status HTTP {status.status_code}")
-        vqd = status.headers.get("x-vqd-4")
-        if vqd:
-            chat = httpx.post(
-                "https://duckduckgo.com/duckchat/v1/chat",
-                headers={
-                    "x-vqd-4": vqd,
-                    "Content-Type": "application/json",
-                    "User-Agent": "Mozilla/5.0",
-                },
-                json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "ок"}]},
-                timeout=40,
-            )
-            print(f"duckduckgo: chat HTTP {chat.status_code} {chat.text[:160]!r}")
-            found = found or chat.status_code == 200
-    except httpx.HTTPError as exc:
-        print(f"duckduckgo: ERROR {type(exc).__name__}")
-    pollinations = probe(
+def probe_keyless(digest: str) -> bool:
+    """Find out what the keyless endpoint accepts; used only for the demo tier."""
+    headers = {"Content-Type": "application/json"}
+    short = {"role": "user", "content": "ответь одним словом: ок"}
+    system = {"role": "system", "content": "Ты — маршрутизатор базы знаний."}
+    minimal = probe(
         POLLINATIONS_BASE_URL,
-        {"model": "openai", "messages": [{"role": "user", "content": "ответь: ок"}]},
-        {"Content-Type": "application/json"},
+        {"model": "openai", "messages": [short]},
+        headers,
         "pollinations: minimal",
     )[0]
-    # Extra parameters are what the free tier rejected earlier; the bot now omits them.
-    probe(
+    with_accept = probe(
         POLLINATIONS_BASE_URL,
-        {
-            "model": "openai",
-            "messages": [{"role": "user", "content": "ответь: ок"}],
-            "temperature": 0.0,
-            "max_tokens": 300,
-            "response_format": {"type": "json_object"},
-        },
-        {"Content-Type": "application/json"},
-        "pollinations: full params",
-    )
-    return found or pollinations
+        {"model": "openai", "messages": [short]},
+        {"Content-Type": "application/json", "Accept": "application/json"},
+        "pollinations: +Accept header",
+    )[0]
+    prompt_variants = {
+        "system short + user": [system, short],
+        "system digest + user": [
+            {"role": "system", "content": SYSTEM_PROMPT.format(digest=digest)},
+            {
+                "role": "user",
+                "content": "# Вопрос клиента\nКак почистить КАН Ультра?\n\n# Контекст диалога\nнет",
+            },
+        ],
+        "digest inside user": [
+            {
+                "role": "user",
+                "content": (
+                    "База знаний:\n" + digest + "\n\nВопрос клиента: Как почистить КАН Ультра?\n"
+                    "Ответь JSON-объектом."
+                ),
+            }
+        ],
+    }
+    ok = minimal or with_accept
+    for label, messages in prompt_variants.items():
+        result = probe(
+            POLLINATIONS_BASE_URL,
+            {"model": "openai", "messages": messages},
+            headers,
+            f"pollinations: {label}",
+        )[0]
+        ok = ok or result
+    try:
+        models = httpx.get("https://text.pollinations.ai/models", timeout=25)
+        print(f"pollinations: GET /models HTTP {models.status_code} {models.text[:200]!r}")
+    except httpx.HTTPError as exc:
+        print(f"pollinations: GET /models ERROR {type(exc).__name__}")
+    try:
+        available = httpx.get("https://api.llm7.io/v1/models", timeout=25)
+        models = available.json().get("data", []) if available.status_code == 200 else []
+        names = [item.get("id") for item in models][:12]
+        print(f"llm7.io: GET /v1/models HTTP {available.status_code} {names}")
+        for name in names[:3]:
+            if name:
+                probe(
+                    "https://api.llm7.io/v1/chat/completions",
+                    {"model": name, "messages": [{"role": "user", "content": "ответь: ок"}]},
+                    headers,
+                    f"llm7.io {name}",
+                )
+    except (httpx.HTTPError, ValueError) as exc:
+        print(f"llm7.io: GET /v1/models ERROR {type(exc).__name__}")
+    return ok
 
 
 def main() -> int:
@@ -187,7 +202,7 @@ def main() -> int:
         short = {"model": model, "messages": [{"role": "user", "content": "ок"}], "max_tokens": 5}
         ok, _ = probe(f"{GITHUB_MODELS_BASE}/chat/completions", short, headers, "github: minimal")
     if not ok:
-        ok = probe_keyless()
+        ok = probe_keyless(digest)
     print("Итог: внешняя модель доступна" if ok else "Итог: внешние модели недоступны")
     return 0 if ok else 1
 
