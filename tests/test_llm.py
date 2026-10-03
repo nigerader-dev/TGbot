@@ -42,7 +42,7 @@ def completion(content: str, status: int = 200) -> httpx.Response:
 def test_auto_prefers_an_explicit_key():
     resolved = resolve_llm_config({"LLM_API_KEY": FAKE_KEY})
     assert resolved is not None
-    assert (resolved.provider, resolved.model) == ("openai", "gpt-4o-mini")
+    assert (resolved.provider, resolved.model) == ("openai", "gpt-6-luna")
     assert resolved.public_view()["key_configured"] is True
     assert FAKE_KEY not in json.dumps(resolved.public_view())
 
@@ -436,3 +436,61 @@ def test_malformed_answers_pause_the_model_briefly_instead_of_disabling_it():
 def test_router_is_idle_when_the_ai_layer_is_off():
     router = LLMRouter(config(provider="openai", api_key=""))
     assert route(router) is None
+
+
+KEYED_PRESETS = {
+    "openai": ("https://api.openai.com/v1", "gpt-6-luna"),
+    "openrouter": ("https://openrouter.ai/api/v1", "meta-llama/llama-3.1-8b-instruct"),
+    "groq": ("https://api.groq.com/openai/v1", "openai/gpt-oss-20b"),
+    "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat"),
+    "mistral": ("https://api.mistral.ai/v1", "mistral-small-latest"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.5-flash-lite"),
+}
+
+
+@pytest.mark.parametrize("provider,expected", sorted(KEYED_PRESETS.items()))
+def test_every_keyed_provider_preset_connects_with_llm_api_key(provider, expected):
+    """Секрет LLM_API_KEY должен включать любого провайдера без правок кода."""
+    config = resolve_llm_config({"LLM_PROVIDER": provider, "LLM_API_KEY": FAKE_KEY})
+    assert config is not None
+    assert (config.base_url, config.model) == expected
+    assert config.needs_key is True
+    assert config.api_key == FAKE_KEY
+    assert FAKE_KEY not in json.dumps(config.public_view())
+
+
+def test_the_key_of_a_provider_specific_variable_works_too():
+    config = resolve_llm_config({"LLM_PROVIDER": "groq", "GROQ_API_KEY": FAKE_KEY})
+    assert config is not None and config.api_key == FAKE_KEY
+    assert resolve_llm_config({"LLM_PROVIDER": "groq"}) is None  # без ключа провайдер выключен
+
+
+def test_auto_recognizes_a_provider_specific_key():
+    """GEMINI_API_KEY без LLM_PROVIDER уже выбирает Gemini."""
+    configs = resolve_llm_configs({"GEMINI_API_KEY": "gem-key"})
+    assert configs[0].provider == "gemini"
+    assert configs[0].model == "gemini-3.5-flash-lite"
+    assert configs[0].api_key == "gem-key"
+    groq_first = resolve_llm_config({"GROQ_API_KEY": "groq-key"})
+    assert groq_first.provider == "groq"
+
+
+def test_json_mode_is_dropped_when_a_provider_rejects_it():
+    seen = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        seen.append(body)
+        if "response_format" in body:
+            return httpx.Response(
+                400, json={"error": {"message": "Unsupported parameter: response_format"}}
+            )
+        return completion('{"action":"answer","entry_id":"kit_frequency"}')
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    router = LLMRouter(config(retries=1), client=client)
+    verdict = route(router)
+    assert verdict is not None and verdict.entry_id == "kit_frequency"
+    assert "response_format" in seen[0] and "response_format" not in seen[1]
+    assert router.state == "ready"
+    assert router.last_error is None

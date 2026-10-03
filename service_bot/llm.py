@@ -50,7 +50,7 @@ class ProviderPreset:
 
 PRESETS: dict[str, ProviderPreset] = {
     "openai": ProviderPreset(
-        OPENAI_BASE_URL, "gpt-4o-mini", ("LLM_API_KEY", "OPENAI_API_KEY"), True
+        OPENAI_BASE_URL, "gpt-6-luna", ("LLM_API_KEY", "OPENAI_API_KEY"), True
     ),
     "github": ProviderPreset(
         GITHUB_MODELS_BASE_URL,
@@ -66,7 +66,7 @@ PRESETS: dict[str, ProviderPreset] = {
     ),
     "groq": ProviderPreset(
         "https://api.groq.com/openai/v1",
-        "llama-3.1-8b-instant",
+        "openai/gpt-oss-20b",
         ("LLM_API_KEY", "GROQ_API_KEY"),
         True,
     ),
@@ -81,7 +81,7 @@ PRESETS: dict[str, ProviderPreset] = {
     ),
     "gemini": ProviderPreset(
         "https://generativelanguage.googleapis.com/v1beta/openai",
-        "gemini-2.0-flash",
+        "gemini-3.5-flash-lite",
         ("LLM_API_KEY", "GEMINI_API_KEY"),
         True,
     ),
@@ -142,6 +142,14 @@ def _first_env(env: Mapping[str, str], names: tuple[str, ...]) -> str:
 
 
 KEYLESS_FALLBACKS = ("llm7", "pollinations")
+# Ключи, по которым режим auto понимает провайдера без переменной LLM_PROVIDER.
+PROVIDER_KEY_VARS = (
+    ("gemini", ("GEMINI_API_KEY",)),
+    ("groq", ("GROQ_API_KEY",)),
+    ("openrouter", ("OPENROUTER_API_KEY",)),
+    ("deepseek", ("DEEPSEEK_API_KEY",)),
+    ("mistral", ("MISTRAL_API_KEY",)),
+)
 
 
 def resolve_llm_config(env: Mapping[str, str] | None = None) -> LLMConfig | None:
@@ -176,6 +184,9 @@ def _provider_chain(environment: Mapping[str, str], provider: str) -> list[str]:
     if provider != "auto":
         return [provider]
     chain: list[str] = []
+    for name, keys in PROVIDER_KEY_VARS:
+        if _first_env(environment, keys):
+            chain.append(name)
     if _first_env(environment, ("LLM_API_KEY", "OPENAI_API_KEY")):
         chain.append("openai")
     if _first_env(environment, ("GH_MODELS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")):
@@ -468,12 +479,14 @@ class LLMRouter:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
+        payload = self._payload(system, user)
+        json_mode_dropped = False
         for attempt in range(self.config.retries + 1):
             self.calls += 1
             try:
                 response = await self._client.post(
                     f"{self.config.base_url}/chat/completions",
-                    json=self._payload(system, user),
+                    json=payload,
                     headers=headers,
                 )
             except httpx.HTTPError:
@@ -489,6 +502,18 @@ class LLMRouter:
                 self._record_rate_limit(response.text)
                 break
             if response.status_code >= 400:
+                if (
+                    response.status_code == 400
+                    and not json_mode_dropped
+                    and "response_format" in response.text
+                    and "response_format" in payload
+                ):
+                    # Провайдер не поддерживает JSON-режим: пробуем без него.
+                    json_mode_dropped = True
+                    payload = {
+                        key: value for key, value in payload.items() if key != "response_format"
+                    }
+                    continue
                 kind = f"http_{response.status_code}"
                 self._record_failure(kind, response.text)
                 if response.status_code >= 500 and attempt < self.config.retries:

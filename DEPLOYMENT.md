@@ -26,7 +26,8 @@
 
 | Провайдер | Результат из CI |
 | --- | --- |
-| `llm7` (по умолчанию, без ключа) | отвечает; лимит ~1 запрос в секунду, `Retry-After` учитывается |
+| свой ключ (`gemini`, `groq`, `openrouter`, OpenAI) | не проверялся автоматически: нужен ключ владельца; включается секретом `LLM_API_KEY` |
+| `llm7` (без ключа) | отвечает; лимит ~1 запрос в секунду и суточная квота, `Retry-After` учитывается |
 | `github` (`models.github.ai`) | в этом окружении хост отвечает заглушкой `200 text/plain OK` — ИИ-слой уходит в резерв |
 | `pollinations` (без ключа) | отвечает HTTP 402, поэтому не используется по умолчанию |
 
@@ -56,6 +57,19 @@
    «Validate the knowledge base», «Check the AI layer» и «Run the Telegram bot» прошли.
 5. Ссылка на бота печатается в summary приёмочного workflow (job *Prepare and verify
    Telegram*); токен в артефакты и summary не попадает.
+
+### Свой ключ ИИ за 5 минут
+
+1. Бесплатный ключ: Google AI Studio (https://aistudio.google.com/apikey), Groq
+   (https://console.groq.com/keys), OpenRouter (https://openrouter.ai/keys).
+2. *Settings → Secrets and variables → Actions → Secrets → New repository secret*:
+   имя `LLM_API_KEY`, значение — ключ. В коде, YAML и логах ключа нет.
+3. *Variables → New repository variable*: `LLM_PROVIDER` = `gemini` (для Google),
+   `groq` (для Groq), `openrouter` — иначе `auto` попробует OpenAI-совместимый
+   протокол по умолчанию. При желании задайте `LLM_MODEL`.
+4. *Actions → Telegram - hosted bot (scheduled AI sessions) → Run workflow*:
+   в шаге «Check the AI layer» должно быть `layer=llm`, команда `/status` в боте
+   покажет подключённую модель.
 
 Если ИИ-модель нужно заменить (например, на корпоративный шлюз или локальную Ollama):
 

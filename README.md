@@ -65,8 +65,8 @@
 | --- | --- | --- |
 | Бесплатный внешний шлюз llm7.io | ничего: `LLM_PROVIDER` по умолчанию `llm7` | `GLM-5.3-Flash`, ключ не нужен |
 | GitHub Models (бесплатно с токеном Actions) | `LLM_PROVIDER=github` + `GH_MODELS_TOKEN` (в Actions это `${{ github.token }}` с `permissions: models: read`) | `openai/gpt-4o-mini` |
-| OpenAI-совместимый API | `LLM_API_KEY` (+ `LLM_BASE_URL`, `LLM_MODEL`), режим `auto` выберет его первым | `https://api.openai.com/v1`, `gpt-4o-mini` |
-| OpenRouter / Groq / DeepSeek / Mistral / Gemini | `LLM_PROVIDER=openrouter|groq|deepseek|mistral|gemini` + ключ | маленькая модель провайдера |
+| OpenAI-совместимый API | `LLM_API_KEY` (+ `LLM_BASE_URL`, `LLM_MODEL`), режим `auto` выберет его первым | `https://api.openai.com/v1`, `gpt-6-luna` |
+| OpenRouter / Groq / DeepSeek / Mistral / Gemini | `LLM_PROVIDER=openrouter|groq|deepseek|mistral|gemini` + ключ | маленькая модель провайдера (`openai/gpt-oss-20b`, `gemini-3.5-flash-lite`, …) |
 | Локальная модель (Ollama, LM Studio) | `LLM_PROVIDER=ollama` | `http://127.0.0.1:11434/v1`, `llama3.2` |
 | Резервный keyless-вариант | `LLM_PROVIDER=pollinations` | `openai` (в CI отвечал 402, оставлен запасным) |
 | Без ИИ вообще | `AI_ENABLED=0` | отвечают только правила базы |
@@ -80,6 +80,33 @@ workflow) → бесплатные внешние шлюзы. Первый пр�
 Модель легко заменить на корпоративный шлюз: `LLM_PROVIDER=custom`, `LLM_BASE_URL`,
 `LLM_MODEL` и секрет `LLM_API_KEY`. Внешние бесплатные шлюзы не дают SLA и видят текст
 вопроса клиента — для эксплуатации лучше свой ключ или локальная модель.
+
+### Как подключить свой ключ за 5 минут
+
+1. Возьмите бесплатный ключ у одного из провайдеров (банковская карта не нужна):
+   - **Google AI Studio** — https://aistudio.google.com/apikey, модель по умолчанию
+     `gemini-3.5-flash-lite` (есть бесплатный тариф);
+   - **Groq** — https://console.groq.com/keys, модель `openai/gpt-oss-20b`;
+   - **OpenRouter** — https://openrouter.ai/keys, любую бесплатную модель;
+   - **OpenAI** — https://platform.openai.com/api-keys, модель `gpt-6-luna`
+     (самая дешёвая, но это платный тариф).
+2. Откройте *Settings → Secrets and variables → Actions → Secrets → New repository
+   secret*: имя `LLM_API_KEY`, значение — ваш ключ. Ключ не попадает ни в код, ни в
+   логи, ни в сообщения бота.
+3. Если провайдер не OpenAI, на вкладке *Variables* создайте переменную
+   `LLM_PROVIDER` со значением `gemini`, `groq`, `openrouter`, `deepseek` или
+   `mistral`. Для OpenAI достаточно одного секрета — режим `auto` выберет его первым.
+   Ключ в переменной `GEMINI_API_KEY` (или `GROQ_API_KEY` и т.д.) тоже распознаётся
+   автоматически, без `LLM_PROVIDER`.
+4. Перезапустите бота: *Actions → Telegram - hosted bot (scheduled AI sessions) →
+   Run workflow*. В шаге «Check the AI layer» должно появиться `layer=llm` и имя
+   модели; команда `/status` в боте показывает подключённую цепочку.
+5. Найдите точное имя модели в личном кабинете провайдера и при необходимости
+   задайте его переменной `LLM_MODEL` — список моделей у провайдеров меняется.
+
+Корпоративный шлюз (в том числе YandexGPT, GigaChat и другие OpenAI-совместимые
+сервисы) подключается так же: `LLM_PROVIDER=custom`, `LLM_BASE_URL=<адрес>/v1`,
+`LLM_MODEL=<модель>` и секрет `LLM_API_KEY`.
 
 Проверить подключение можно командами:
 
@@ -245,7 +272,7 @@ pytest --cov=service_bot --cov-report=term-missing --cov-fail-under=90
 (имитация провайдера через `httpx.MockTransport`) и отрицательные сценарии:
 `tests/test_ai.py`, `tests/test_llm.py`. Реальные сетевые вызовы в тестах запрещены:
 `tests/conftest.py` удаляет ключи и токены из окружения. Текущий результат —
-**261 тест, покрытие 96%** (см. `VERIFICATION.md`).
+**270 тестов, покрытие 96%** (см. `VERIFICATION.md`).
 
 Дополнительно проверен настоящий Chromium-сценарий демо:
 

@@ -10,10 +10,19 @@ sandbox + настоящие GitHub Actions репозитория `nigerader-de
 - `ruff check .` — без замечаний; `ruff format --check .` — 24 файла уже
   отформатированы.
 - `pytest --cov=service_bot --cov-report=term-missing --cov-fail-under=90` —
-  **261 passed**, покрытие **96%** (41 непокрытая строка из 1089).
+  **270 passed**, покрытие **96%** (41 непокрытая строка из 1099).
 - `node --check service_bot/static/app.js` — синтаксис JavaScript корректен.
 - Тесты ИИ-слоя (`tests/test_ai.py`, `tests/test_llm.py`) используют
   `httpx.MockTransport`: реальных сетевых вызовов и ключей в тестах нет.
+- Проверены все ключевые провайдеры: для каждого пресета (`openai`, `openrouter`,
+  `groq`, `deepseek`, `mistral`, `gemini`) тест подтверждает, что секрет
+  `LLM_API_KEY` подключает провайдера без правок кода, а ключ не попадает в
+  публичные данные (`public_view`). Отдельно проверено, что режим `auto` узнаёт
+  ключ `GEMINI_API_KEY`/`GROQ_API_KEY` без переменной `LLM_PROVIDER` и что JSON-режим
+  автоматически снимается, если провайдер его не поддерживает.
+- Модели у провайдеров сверены с официальными страницами (октябрь 2026):
+  OpenAI `gpt-6-luna`, Google `gemini-3.5-flash-lite`, Groq `openai/gpt-oss-20b`
+  (прежние `gpt-4o-mini`, `gemini-2.0-flash`, `llama-3.1-8b-instant` устарели).
 
 ## Веб-демо: полный путь «модель → база знаний»
 
