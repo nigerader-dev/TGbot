@@ -211,6 +211,18 @@ class AIAssistant:
                 ),
             )
         if verdict.action == "clarify":
+            if decision.reply.status != "clarify":
+                # Модель не может отменить уже найденный ответ базы или заменить
+                # честный отказ просьбой уточнить то, что клиент уже назвал.
+                return replace(
+                    decision.reply,
+                    ai=ai_metadata(
+                        layer="rules_guard",
+                        config=config,
+                        verdict=verdict,
+                        note="уточнение модели не требуется: " + rule_note,
+                    ),
+                )
             return replace(
                 decision.reply,
                 ai=ai_metadata(layer="llm", config=config, verdict=verdict, note=rule_note),

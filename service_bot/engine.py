@@ -56,6 +56,7 @@ class Reply:
 class Conversation:
     station_id: str | None = None
     pending_intent: str | None = None
+    last_intent: str | None = None
     updated_at: float = 0
 
 
@@ -123,9 +124,19 @@ class AnswerEngine:
         )
 
     def missing_reply(
-        self, *, reason: str, station_name: str | None = None, ai: dict | None = None
+        self,
+        *,
+        reason: str,
+        station_name: str | None = None,
+        intent_name: str | None = None,
+        ai: dict | None = None,
     ) -> Reply:
-        if station_name:
+        if station_name and intent_name:
+            text = (
+                f"В моей базе знаний нет информации по теме «{intent_name}» "
+                f"для станции {station_name}. "
+            )
+        elif station_name:
             text = f"В моей базе знаний нет информации по обслуживанию станции {station_name}. "
         else:
             text = "В моей базе знаний нет информации по этому вопросу. "
@@ -142,7 +153,9 @@ class AnswerEngine:
         if state.station_id and state.station_id in self.knowledge.stations:
             name = self.knowledge.stations[state.station_id].name
             notes.append(f"в диалоге уже определена модель {name}")
-        intent = self.knowledge.intents.get(intent_id or state.pending_intent or "")
+        intent = self.knowledge.intents.get(
+            intent_id or state.pending_intent or state.last_intent or ""
+        )
         if intent is not None:
             notes.append(f"тема: «{intent.name}»")
         if state.pending_intent:
@@ -186,6 +199,7 @@ class AnswerEngine:
                 elif analysis.stations:
                     state.station_id = next(iter(analysis.stations))
                 state.pending_intent = None
+                state.last_intent = "overflow"
                 return Decision(self.answer_reply(entry), "answer", False, analysis)
 
         if analysis.unknown_station or analysis.unsupported_topic or analysis.unknown_terms:
@@ -225,8 +239,9 @@ class AnswerEngine:
             return Decision(self.missing_reply(reason="negated_overflow"), "guard", True, analysis)
 
         intent = next(iter(analysis.intents), None)
-        if intent is None and analysis.stations and state.pending_intent:
-            intent = state.pending_intent
+        if intent is None and analysis.stations and (state.pending_intent or state.last_intent):
+            # «А КИТ?» после вопроса об обслуживании продолжает ту же тему.
+            intent = state.pending_intent or state.last_intent
         if intent is None:
             state.pending_intent = None
             if analysis.stations:
@@ -253,6 +268,7 @@ class AnswerEngine:
         generic = self.knowledge.find(None, intent)
         if generic:
             state.pending_intent = None
+            state.last_intent = intent
             return Decision(self.answer_reply(generic), "answer", False, analysis, intent_id=intent)
         if state.station_id is None:
             state.pending_intent = intent
@@ -269,8 +285,13 @@ class AnswerEngine:
         entry = self.knowledge.find(state.station_id, intent)
         if entry is None:
             station = self.knowledge.stations[state.station_id]
+            topic = self.knowledge.intents.get(intent)
             return Decision(
-                self.missing_reply(reason="no_entry_for_model_and_intent"),
+                self.missing_reply(
+                    reason="no_entry_for_model_and_intent",
+                    station_name=station.name,
+                    intent_name=topic.name if topic else None,
+                ),
                 "missing",
                 False,
                 analysis,
@@ -278,6 +299,7 @@ class AnswerEngine:
                 station_name=station.name,
                 intent_id=intent,
             )
+        state.last_intent = intent
         return Decision(
             self.answer_reply(entry),
             "answer",
