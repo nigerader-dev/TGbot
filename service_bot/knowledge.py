@@ -113,6 +113,7 @@ class KnowledgeStore:
     def __init__(self, document: KnowledgeDocument):
         self.document = document
         self.stations = MappingProxyType({station.id: station for station in document.stations})
+        self.intents = MappingProxyType({intent.id: intent for intent in document.intents})
         self.entries = MappingProxyType({entry.id: entry for entry in document.entries})
         self.by_scope = MappingProxyType(
             {(entry.station_id, entry.intent_id): entry for entry in document.entries}
@@ -129,5 +130,6 @@ class KnowledgeStore:
         return {
             "revision": self.document.revision,
             "stations": [station.model_dump() for station in self.document.stations],
+            "intents": [intent.model_dump() for intent in self.document.intents],
             "entries": [entry.model_dump() for entry in self.document.entries],
         }

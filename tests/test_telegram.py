@@ -4,7 +4,6 @@ import json
 import httpx
 import pytest
 
-from service_bot.engine import AnswerEngine
 from service_bot.telegram import TelegramBot, TelegramFailure
 
 FAKE_TOKEN = "123456:fake_test_token_not_for_real_telegram"
@@ -47,7 +46,7 @@ def base_handler(request):
     return success()
 
 
-def test_initialization(engine):
+def test_initialization(assistant):
     calls = []
 
     def handler(request):
@@ -56,7 +55,7 @@ def test_initialization(engine):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             await bot.initialize()
             assert bot.status.state == "polling"
             assert bot.status.username == "test_service_bot"
@@ -75,7 +74,7 @@ def test_initialization(engine):
         ("Как почистить станцию Тверь?", None),
     ],
 )
-def test_telegram_acceptance(engine, knowledge, query, entry_id):
+def test_telegram_acceptance(knowledge, query, entry_id, assistant):
     sent = []
 
     def handler(request):
@@ -85,7 +84,7 @@ def test_telegram_acceptance(engine, knowledge, query, entry_id):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             await bot.handle_update(message(query))
 
     asyncio.run(scenario())
@@ -98,7 +97,7 @@ def test_telegram_acceptance(engine, knowledge, query, entry_id):
         assert "сервисный отдел" in sent[0]["text"]
 
 
-def test_private_only_and_nontext(engine):
+def test_private_only_and_nontext(assistant):
     sent = []
 
     def handler(request):
@@ -108,7 +107,7 @@ def test_private_only_and_nontext(engine):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             await bot.handle_update(message(kind="group"))
             bot_message = message()
             bot_message["message"]["from"]["is_bot"] = True
@@ -122,7 +121,7 @@ def test_private_only_and_nontext(engine):
     assert "только текстовые вопросы" in sent[0]["text"]
 
 
-def test_callbacks_and_clarification(engine, knowledge):
+def test_callbacks_and_clarification(knowledge, assistant):
     methods = []
     sent = []
 
@@ -134,7 +133,7 @@ def test_callbacks_and_clarification(engine, knowledge):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             await bot.handle_update(message("Как самому обслужить станцию?"))
             assert sent[-1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == (
                 "station:kan_ultra"
@@ -155,19 +154,19 @@ def test_callbacks_and_clarification(engine, knowledge):
 
 
 @pytest.mark.parametrize("token", ["", "no-token", "123:x", "secret\nwith\nnewlines"])
-def test_invalid_token_format_never_calls_network(engine, token):
+def test_invalid_token_format_never_calls_network(token, assistant):
     async def scenario():
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(lambda request: pytest.fail("Unexpected API request"))
         ) as client:
-            bot = TelegramBot(token, engine, client=client)
+            bot = TelegramBot(token, assistant, client=client)
             with pytest.raises(TelegramFailure, match="Неверный формат"):
                 await bot.initialize()
 
     asyncio.run(scenario())
 
 
-def test_active_webhook_is_not_deleted(engine):
+def test_active_webhook_is_not_deleted(assistant):
     calls = []
 
     def handler(request):
@@ -179,7 +178,7 @@ def test_active_webhook_is_not_deleted(engine):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             with pytest.raises(TelegramFailure, match="активен webhook"):
                 await bot.initialize()
 
@@ -187,13 +186,13 @@ def test_active_webhook_is_not_deleted(engine):
     assert "deleteWebhook" not in calls
 
 
-def test_invalid_username(engine):
+def test_invalid_username(assistant):
     async def scenario():
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(lambda request: success({"username": "<injected>"}))
         ) as client:
             with pytest.raises(TelegramFailure, match="имя"):
-                await TelegramBot(FAKE_TOKEN, engine, client=client).initialize()
+                await TelegramBot(FAKE_TOKEN, assistant, client=client).initialize()
 
     asyncio.run(scenario())
 
@@ -202,7 +201,7 @@ def test_invalid_username(engine):
     "code,retryable",
     [(401, False), (403, False), (409, False), (400, False), (429, True), (500, True)],
 )
-def test_errors_are_sanitized(engine, code, retryable):
+def test_errors_are_sanitized(code, retryable, assistant):
     async def scenario():
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(
@@ -217,7 +216,7 @@ def test_errors_are_sanitized(engine, code, retryable):
                 )
             )
         ) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             with pytest.raises(TelegramFailure) as error:
                 await bot._call("getMe")
             assert error.value.retryable == retryable
@@ -229,41 +228,41 @@ def test_errors_are_sanitized(engine, code, retryable):
 
 
 @pytest.mark.parametrize("body", ["not-json", "[]"])
-def test_bad_api_response(engine, body):
+def test_bad_api_response(body, assistant):
     async def scenario():
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(lambda request: httpx.Response(200, text=body))
         ) as client:
             with pytest.raises(TelegramFailure) as error:
-                await TelegramBot(FAKE_TOKEN, engine, client=client)._call("getMe")
+                await TelegramBot(FAKE_TOKEN, assistant, client=client)._call("getMe")
             assert error.value.retryable
 
     asyncio.run(scenario())
 
 
-def test_network_error_does_not_leak_token(engine):
+def test_network_error_does_not_leak_token(assistant):
     def handler(request):
         raise httpx.ConnectError(f"Failed URL {request.url}", request=request)
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with pytest.raises(TelegramFailure) as error:
-                await TelegramBot(FAKE_TOKEN, engine, client=client)._call("getMe")
+                await TelegramBot(FAKE_TOKEN, assistant, client=client)._call("getMe")
             assert error.value.retryable
             assert FAKE_TOKEN not in str(error.value)
 
     asyncio.run(scenario())
 
 
-def test_client_must_be_initialized(engine):
+def test_client_must_be_initialized(assistant):
     async def scenario():
         with pytest.raises(RuntimeError):
-            await TelegramBot(FAKE_TOKEN, engine)._call("getMe")
+            await TelegramBot(FAKE_TOKEN, assistant)._call("getMe")
 
     asyncio.run(scenario())
 
 
-def test_retry_send_uses_identical_cached_reply(engine):
+def test_retry_send_uses_identical_cached_reply(engine, assistant):
     sent = []
 
     def handler(request):
@@ -275,7 +274,7 @@ def test_retry_send_uses_identical_cached_reply(engine):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             engine.respond("Как самому обслужить станцию?", "tg:123:123")
             update = message("КАН Ультра", uid=9)
             with pytest.raises(TelegramFailure):
@@ -289,7 +288,7 @@ def test_retry_send_uses_identical_cached_reply(engine):
     assert "youtu.be" in sent[1]
 
 
-def test_polling_offsets_and_cancellation(engine):
+def test_polling_offsets_and_cancellation(assistant):
     polls = []
     sent = []
 
@@ -314,7 +313,7 @@ def test_polling_offsets_and_cancellation(engine):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             with pytest.raises(asyncio.CancelledError):
                 await bot.run()
             assert bot.offset == 6
@@ -327,7 +326,7 @@ def test_polling_offsets_and_cancellation(engine):
     assert len(sent) == 2
 
 
-def test_polling_conflict_stops_with_clear_status(engine):
+def test_polling_conflict_stops_with_clear_status(assistant):
     def handler(request):
         if request.url.path.endswith("/getUpdates"):
             return httpx.Response(409, json={"ok": False, "error_code": 409})
@@ -335,7 +334,7 @@ def test_polling_conflict_stops_with_clear_status(engine):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             await bot.run()
             assert bot.status.state == "error"
             assert "Конфликт" in bot.status.message
@@ -343,7 +342,7 @@ def test_polling_conflict_stops_with_clear_status(engine):
     asyncio.run(scenario())
 
 
-def test_blocked_chat_does_not_stop_other_chats(engine):
+def test_blocked_chat_does_not_stop_other_chats(assistant):
     polls = [0]
     accepted = []
 
@@ -363,7 +362,7 @@ def test_blocked_chat_does_not_stop_other_chats(engine):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             with pytest.raises(asyncio.CancelledError):
                 await bot.run()
             assert bot.offset == 3
@@ -374,7 +373,7 @@ def test_blocked_chat_does_not_stop_other_chats(engine):
 
 
 @pytest.mark.parametrize("failure_phase", ["getMe", "getUpdates"])
-def test_transient_errors_are_retried(engine, monkeypatch, failure_phase):
+def test_transient_errors_are_retried(monkeypatch, failure_phase, assistant):
     attempts = [0]
     sleeps = []
 
@@ -398,7 +397,7 @@ def test_transient_errors_are_retried(engine, monkeypatch, failure_phase):
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            bot = TelegramBot(FAKE_TOKEN, engine, client=client)
+            bot = TelegramBot(FAKE_TOKEN, assistant, client=client)
             with pytest.raises(asyncio.CancelledError):
                 await bot.run()
 
@@ -406,7 +405,7 @@ def test_transient_errors_are_retried(engine, monkeypatch, failure_phase):
     assert sleeps == [3]
 
 
-def test_owned_client_is_closed(engine, monkeypatch):
+def test_owned_client_is_closed(assistant, monkeypatch):
     original = httpx.AsyncClient
     clients = []
 
@@ -424,7 +423,7 @@ def test_owned_client_is_closed(engine, monkeypatch):
 
     async def scenario():
         with pytest.raises(asyncio.CancelledError):
-            await TelegramBot(FAKE_TOKEN, AnswerEngine(engine.knowledge)).run()
+            await TelegramBot(FAKE_TOKEN, assistant).run()
 
     asyncio.run(scenario())
     assert clients[0].is_closed

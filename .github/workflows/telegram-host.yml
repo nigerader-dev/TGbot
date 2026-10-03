@@ -1,0 +1,83 @@
+name: Telegram - hosted bot (scheduled AI sessions)
+
+# Непрерывный хостинг прототипа средствами GitHub: каждый запуск держит одного
+# polling-процесса до 6 часов, расписание перезапускает его каждые 6 часов.
+# Два запуска никогда не пересекаются: общая concurrency-группа с приёмочным тестом.
+
+on:
+  schedule:
+    - cron: '7 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: 'Сколько минут держать бота подключённым (1-348)'
+        type: number
+        default: 60
+
+permissions:
+  contents: read
+  models: read
+
+concurrency:
+  group: telegram-bot-${{ github.repository_id }}
+  cancel-in-progress: false
+
+jobs:
+  host:
+    name: Polling host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    env:
+      DEMO_MINUTES: ${{ inputs.duration_minutes || '345' }}
+      # ИИ-слой: auto = ключ -> GitHub Models (токен workflow) -> бесплатные внешние
+      # шлюзы. Переопределяется repository variable.
+      LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'auto' }}
+      LLM_MODEL: ${{ vars.LLM_MODEL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      GH_MODELS_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install runtime
+        run: pip install -r requirements.txt
+      - name: Check private token configuration
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::Create the TELEGRAM_BOT_TOKEN repository Actions secret. Never put the token in source code."
+            exit 1
+          fi
+      - name: Validate the knowledge base
+        run: python -m service_bot validate-kb
+      - name: Check the AI layer
+        continue-on-error: true
+        run: |
+          if python -m service_bot ai-check > "$RUNNER_TEMP/ai-check.txt" 2>&1; then
+            echo "::notice title=AI layer::model answered from the knowledge base"
+          else
+            python scripts/check_models.py >> "$RUNNER_TEMP/ai-check.txt" 2>&1 || true
+          fi
+          cat "$RUNNER_TEMP/ai-check.txt"
+          {
+            echo "## ИИ-слой"
+            echo '```'
+            cat "$RUNNER_TEMP/ai-check.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Run the Telegram bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          echo "## Хостинг бота" >> "$GITHUB_STEP_SUMMARY"
+          echo "Плановое время работы: $DEMO_MINUTES минут." >> "$GITHUB_STEP_SUMMARY"
+          echo "Следующий запуск поднимет бота автоматически по расписанию." >> "$GITHUB_STEP_SUMMARY"
+          python -m service_bot telegram --duration "$((DEMO_MINUTES * 60))"
+      - name: Session finished
+        if: always()
+        run: echo "Сессия хостинга завершена. Следующий запуск — по расписанию." >> "$GITHUB_STEP_SUMMARY"
