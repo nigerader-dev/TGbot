@@ -142,6 +142,12 @@ def _first_env(env: Mapping[str, str], names: tuple[str, ...]) -> str:
 
 
 KEYLESS_FALLBACKS = ("llm7", "pollinations")
+# Префиксы ключей, по которым режим auto узнаёт провайдера (если LLM_PROVIDER не задан).
+KEY_PREFIX_HINTS = (
+    ("AIza", "gemini"),
+    ("gsk_", "groq"),
+    ("sk-or-", "openrouter"),
+)
 # Ключи, по которым режим auto понимает провайдера без переменной LLM_PROVIDER.
 PROVIDER_KEY_VARS = (
     ("gemini", ("GEMINI_API_KEY",)),
@@ -187,12 +193,24 @@ def _provider_chain(environment: Mapping[str, str], provider: str) -> list[str]:
     for name, keys in PROVIDER_KEY_VARS:
         if _first_env(environment, keys):
             chain.append(name)
-    if _first_env(environment, ("LLM_API_KEY", "OPENAI_API_KEY")):
+    generic_key = _first_env(environment, ("LLM_API_KEY", "OPENAI_API_KEY"))
+    if generic_key:
+        guessed = _guess_provider(generic_key)
+        if guessed:
+            chain.append(guessed)
         chain.append("openai")
     if _first_env(environment, ("GH_MODELS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")):
         chain.append("github")
     chain.extend(name for name in KEYLESS_FALLBACKS if name not in chain)
     return chain
+
+
+def _guess_provider(api_key: str) -> str | None:
+    """Ключ с известным префиксом сам подсказывает провайдера."""
+    for prefix, provider in KEY_PREFIX_HINTS:
+        if api_key.startswith(prefix):
+            return provider
+    return None
 
 
 def _config_for(environment: Mapping[str, str], provider: str) -> LLMConfig | None:

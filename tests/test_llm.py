@@ -494,3 +494,21 @@ def test_json_mode_is_dropped_when_a_provider_rejects_it():
     assert "response_format" in seen[0] and "response_format" not in seen[1]
     assert router.state == "ready"
     assert router.last_error is None
+
+
+@pytest.mark.parametrize(
+    "api_key,provider",
+    [
+        ("AIzaSyExampleGoogleKey", "gemini"),
+        ("gsk_exampleGroqKey", "groq"),
+        ("sk-or-v1-example", "openrouter"),
+        ("sk-example-openai", "openai"),
+    ],
+)
+def test_auto_guesses_the_provider_from_the_key_prefix(api_key, provider):
+    """Один секрет LLM_API_KEY подключает нужного провайдера без LLM_PROVIDER."""
+    configs = resolve_llm_configs({"LLM_API_KEY": api_key})
+    assert configs[0].provider == provider
+    assert configs[0].api_key == api_key
+    if provider != "openai":
+        assert "openai" in [config.provider for config in configs]  # остаётся как запасной

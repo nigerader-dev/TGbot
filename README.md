@@ -96,8 +96,9 @@ workflow) → бесплатные внешние шлюзы. Первый пр�
 3. Если провайдер не OpenAI, на вкладке *Variables* создайте переменную
    `LLM_PROVIDER` со значением `gemini`, `groq`, `openrouter`, `deepseek` или
    `mistral`. Для OpenAI достаточно одного секрета — режим `auto` выберет его первым.
-   Ключ в переменной `GEMINI_API_KEY` (или `GROQ_API_KEY` и т.д.) тоже распознаётся
-   автоматически, без `LLM_PROVIDER`.
+   Дополнительно режим `auto` понимает ключ по префиксу (`AIza…` — Google, `gsk_…` —
+   Groq, `sk-or-…` — OpenRouter) и по отдельным переменным (`GEMINI_API_KEY`,
+   `GROQ_API_KEY`), но явная переменная `LLM_PROVIDER` надёжнее.
 4. Перезапустите бота: *Actions → Telegram - hosted bot (scheduled AI sessions) →
    Run workflow*. В шаге «Check the AI layer» должно появиться `layer=llm` и имя
    модели; команда `/status` в боте показывает подключённую цепочку.
@@ -272,7 +273,7 @@ pytest --cov=service_bot --cov-report=term-missing --cov-fail-under=90
 (имитация провайдера через `httpx.MockTransport`) и отрицательные сценарии:
 `tests/test_ai.py`, `tests/test_llm.py`. Реальные сетевые вызовы в тестах запрещены:
 `tests/conftest.py` удаляет ключи и токены из окружения. Текущий результат —
-**270 тестов, покрытие 96%** (см. `VERIFICATION.md`).
+**274 теста, покрытие 96%** (см. `VERIFICATION.md`).
 
 Дополнительно проверен настоящий Chromium-сценарий демо:
 
