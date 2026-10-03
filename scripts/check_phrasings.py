@@ -54,17 +54,8 @@ async def ask(assistant, question: str, session: str, pause: float):
     return reply
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--json", help="куда сохранить машинный отчёт")
-    parser.add_argument(
-        "--pause",
-        type=float,
-        default=None,
-        help="пауза между вопросами, секунды (по умолчанию 2 при включённой модели)",
-    )
-    args = parser.parse_args()
-
+async def run(args) -> int:
+    """Один event loop на весь прогон: HTTP-клиент модели нельзя переносить между циклами."""
     root = Path(__file__).resolve().parent.parent
     knowledge = KnowledgeStore.load(root / "knowledge" / "knowledge_base.json")
     assistant = build_assistant(knowledge)
@@ -105,17 +96,19 @@ def main() -> int:
         if not ok:
             failures.append(f"{question!r}: ожидалось {expected!r}, получено {reply.entry_id!r}")
 
-    for question, expected, note in CASES:
-        reply = asyncio.run(ask(assistant, question, "phrasings", pause))
-        record(question, expected, reply, note)
+    try:
+        for question, expected, note in CASES:
+            reply = await ask(assistant, question, "phrasings", pause)
+            record(question, expected, reply, note)
 
-    print("\nКонтекст диалога:")
-    for first, second, expected, note in CONTEXT_CASES:
-        session = f"ctx-{abs(hash((first, second))) % 10**6}"
-        asyncio.run(ask(assistant, first, session, pause))
-        reply = asyncio.run(ask(assistant, second, session, pause))
-        record(f"{first} → {second}", expected, reply, note)
-    asyncio.run(assistant.aclose())
+        print("\nКонтекст диалога:")
+        for first, second, expected, note in CONTEXT_CASES:
+            session = f"ctx-{abs(hash((first, second))) % 10**6}"
+            await ask(assistant, first, session, pause)
+            reply = await ask(assistant, second, session, pause)
+            record(f"{first} → {second}", expected, reply, note)
+    finally:
+        await assistant.aclose()
 
     total = len(rows)
     passed = sum(1 for row in rows if row["ok"])
@@ -140,6 +133,19 @@ def main() -> int:
             print(f"- {item}")
         return 1
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--json", help="куда сохранить машинный отчёт")
+    parser.add_argument(
+        "--pause",
+        type=float,
+        default=None,
+        help="пауза между вопросами, секунды (по умолчанию 1,2 при включённой модели)",
+    )
+    args = parser.parse_args()
+    return asyncio.run(run(args))
 
 
 if __name__ == "__main__":
