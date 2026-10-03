@@ -88,8 +88,11 @@ async def _run_ai_check(knowledge: KnowledgeStore, assistant: AIAssistant) -> in
         )
     for index, router in enumerate(assistant.routers):
         config = router.config
+        model_label = config.model
+        if router.active_model != config.model:
+            model_label = f"{config.model} -> {router.active_model}"
         print(
-            f"Модель {index + 1} ({config.provider}/{config.model}): state={router.state}, "
+            f"Модель {index + 1} ({config.provider}/{model_label}): state={router.state}, "
             f"calls={router.calls}, ответов={router.answered}, уточнений={router.clarified}, "
             f"отказов={router.no_answer}, резерв={router.fallbacks}, "
             f"last_error={router.last_error or 'нет'}, "

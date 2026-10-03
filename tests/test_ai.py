@@ -332,3 +332,41 @@ def test_status_describes_the_provider_chain_without_secrets(engine):
     reply = ask(assistant, "/status")
     assert FAKE_KEY not in reply.text
     assert "llm7/GLM-5.3-Flash" in reply.text
+
+
+def test_the_reply_shows_the_model_the_provider_actually_used(engine, knowledge):
+    """Имя модели устарело, провайдер подставил рабочее — в ответе именно оно."""
+    calls = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        calls.append(payload["model"])
+        if payload["model"] == "gemini-3.5-flash-lite":
+            return httpx.Response(
+                404, json={"error": {"message": "model is not found for API version v1beta"}}
+            )
+        content = json.dumps(by_keyword(payload["messages"][-1]["content"]), ensure_ascii=False)
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    primary = LLMConfig(
+        provider="gemini",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        model="gemini-3.5-flash-lite",
+        api_key=FAKE_KEY,
+        retries=0,
+        model_candidates=("gemini-3.1-flash-lite",),
+    )
+    assistant = AIAssistant(
+        engine,
+        router=LLMRouter(primary, client=httpx.AsyncClient(transport=httpx.MockTransport(handler))),
+        config=primary,
+    )
+    reply = ask(assistant, "Как почистить КАН Ультра?")
+    assert reply.status == "answer"
+    assert reply.text == knowledge.entries["kan_ultra_maintenance"].answer
+    assert reply.ai["layer"] == "llm"
+    assert reply.ai["model"] == "gemini-3.1-flash-lite"
+    assert calls == ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    status = assistant.status()
+    assert status["routers"][0]["active_model"] == "gemini-3.1-flash-lite"
+    assert FAKE_KEY not in json.dumps(status, ensure_ascii=False)

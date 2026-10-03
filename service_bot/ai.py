@@ -162,6 +162,9 @@ class AIAssistant:
             verdict = await router.route(system=self.system_prompt, user=user)
             if verdict is not None:
                 config = self.configs[index] if index < len(self.configs) else router.config
+                if router.active_model != config.model:
+                    # Провайдер заменил устаревшее имя модели — показываем рабочее.
+                    config = replace(config, model=router.active_model)
                 return verdict, config
         return None, self.config
 
@@ -278,6 +281,12 @@ class AIAssistant:
             )
             if self.model_label != self.model_label.split(" → ")[0]:
                 text_out.append("Провайдеры по очереди: " + self.model_label + ".")
+            for router in self.routers:
+                if router.active_model != router.config.model and router.calls:
+                    text_out.append(
+                        f"Модель {router.config.model} недоступна у провайдера, "
+                        f"используется {router.active_model}."
+                    )
             if all(router.state != "ready" for router in self.routers):
                 text_out.append("Все модели временно недоступны — отвечают правила базы знаний.")
             elif any(router.last_error for router in self.routers):

@@ -46,11 +46,16 @@ class ProviderPreset:
     json_mode: bool = True
     minimal_payload: bool = False
     extra_body: Mapping[str, Any] = field(default_factory=dict)
+    fallback_models: tuple[str, ...] = ()
 
 
 PRESETS: dict[str, ProviderPreset] = {
     "openai": ProviderPreset(
-        OPENAI_BASE_URL, "gpt-6-luna", ("LLM_API_KEY", "OPENAI_API_KEY"), True
+        OPENAI_BASE_URL,
+        "gpt-6-luna",
+        ("LLM_API_KEY", "OPENAI_API_KEY"),
+        True,
+        fallback_models=("gpt-5-mini",),
     ),
     "github": ProviderPreset(
         GITHUB_MODELS_BASE_URL,
@@ -69,6 +74,7 @@ PRESETS: dict[str, ProviderPreset] = {
         "openai/gpt-oss-20b",
         ("LLM_API_KEY", "GROQ_API_KEY"),
         True,
+        fallback_models=("openai/gpt-oss-120b", "llama-3.3-70b-versatile"),
     ),
     "deepseek": ProviderPreset(
         "https://api.deepseek.com/v1", "deepseek-chat", ("LLM_API_KEY", "DEEPSEEK_API_KEY"), True
@@ -84,6 +90,7 @@ PRESETS: dict[str, ProviderPreset] = {
         "gemini-3.5-flash-lite",
         ("LLM_API_KEY", "GEMINI_API_KEY"),
         True,
+        fallback_models=("gemini-3.1-flash-lite", "gemini-2.5-flash"),
     ),
     "ollama": ProviderPreset(OLLAMA_BASE_URL, "llama3.2", (), False, json_mode=False),
     "llm7": ProviderPreset(
@@ -120,7 +127,13 @@ class LLMConfig:
     json_mode: bool = True
     minimal_payload: bool = False
     needs_key: bool = True
+    model_candidates: tuple[str, ...] = ()
     extra_body: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def models(self) -> tuple[str, ...]:
+        """Configured model first, then the preset's alternates."""
+        return (self.model, *[m for m in self.model_candidates if m != self.model])
 
     def public_view(self) -> dict:
         """Connection metadata only: the key is never part of any public payload."""
@@ -205,6 +218,29 @@ def _provider_chain(environment: Mapping[str, str], provider: str) -> list[str]:
     return chain
 
 
+MODEL_ERROR_MARKERS = (
+    "not found for api version",
+    "is not found",
+    "does not exist",
+    "unknown model",
+    "invalid model",
+    "unsupported model",
+    "model not found",
+    "no such model",
+    "models/",
+)
+
+
+def _model_rejected(status: int, body: str) -> bool:
+    """The endpoint knows us, but not this model name: try the preset's alternates."""
+    if status == 404:
+        return True
+    if status not in (400, 403, 422):
+        return False
+    lowered = body.casefold()
+    return any(marker in lowered for marker in MODEL_ERROR_MARKERS)
+
+
 def _guess_provider(api_key: str) -> str | None:
     """Ключ с известным префиксом сам подсказывает провайдера."""
     for prefix, provider in KEY_PREFIX_HINTS:
@@ -240,6 +276,7 @@ def _config_for(environment: Mapping[str, str], provider: str) -> LLMConfig | No
         json_mode=preset.json_mode,
         minimal_payload=preset.minimal_payload,
         needs_key=preset.needs_key,
+        model_candidates=preset.fallback_models,
         extra_body=dict(preset.extra_body),
     )
 
@@ -385,6 +422,7 @@ class LLMRouter:
         self._disabled_until = 0.0
         self.last_error: str | None = None
         self.last_error_detail: str | None = None
+        self.active_model = config.model
         self.calls = 0
         self.answered = 0
         self.clarified = 0
@@ -394,6 +432,7 @@ class LLMRouter:
     def public_view(self) -> dict:
         return {
             **self.config.public_view(),
+            "active_model": self.active_model,
             "state": self.state,
             "last_error": self.last_error,
             "last_error_detail": self.last_error_detail,
@@ -499,66 +538,83 @@ class LLMRouter:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         payload = self._payload(system, user)
         json_mode_dropped = False
-        for attempt in range(self.config.retries + 1):
-            self.calls += 1
-            try:
-                response = await self._client.post(
-                    f"{self.config.base_url}/chat/completions",
-                    json=payload,
-                    headers=headers,
+        for model in self.config.models:
+            payload["model"] = model
+            for attempt in range(self.config.retries + 1):
+                self.calls += 1
+                try:
+                    response = await self._client.post(
+                        f"{self.config.base_url}/chat/completions",
+                        json=payload,
+                        headers=headers,
+                    )
+                except httpx.HTTPError:
+                    # Never surface exception strings: the request URL may reveal a token.
+                    self._record_failure("network")
+                    if attempt == self.config.retries:
+                        self.fallbacks += 1
+                        return None
+                    continue
+                if response.status_code == 429:
+                    if attempt < self.config.retries:
+                        await self._sleep(_retry_after(response))
+                        continue
+                    self._record_rate_limit(response.text)
+                    self.fallbacks += 1
+                    return None
+                if response.status_code >= 400:
+                    if (
+                        response.status_code == 400
+                        and not json_mode_dropped
+                        and "response_format" in response.text
+                        and "response_format" in payload
+                    ):
+                        # Провайдер не поддерживает JSON-режим: пробуем без него.
+                        json_mode_dropped = True
+                        payload = {
+                            key: value for key, value in payload.items() if key != "response_format"
+                        }
+                        continue
+                    if _model_rejected(response.status_code, response.text):
+                        # Имя модели изменилось: сообщаем и пробуем следующее.
+                        self.active_model = model
+                        self.last_error = f"model_{response.status_code}"
+                        self.last_error_detail = self._sanitize(response.text)
+                        break
+                    kind = f"http_{response.status_code}"
+                    self._record_failure(kind, response.text)
+                    if response.status_code >= 500 and attempt < self.config.retries:
+                        await self._sleep(self.RETRY_BACKOFF)
+                        continue
+                    self.fallbacks += 1
+                    return None
+                try:
+                    message = response.json()["choices"][0]["message"]
+                    content = message.get("content")
+                    reasoning = message.get("reasoning_content")
+                except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+                    self._record_failure("bad_response", response.text)
+                    self.fallbacks += 1
+                    return None
+                verdict = parse_verdict(content)
+                if verdict is None:
+                    # Some reasoning models keep the JSON only in the thinking channel.
+                    verdict = parse_verdict(reasoning)
+                if verdict is None:
+                    self._record_format_failure(str(content))
+                    self.fallbacks += 1
+                    return None
+                if model != self.config.model:
+                    # Печатаем причину подмены модели в диагностике.
+                    self.last_error = self.last_error or None
+                self.active_model = model
+                self._record_success(verdict)
+                return RouteVerdict(
+                    action=verdict.action,
+                    entry_id=verdict.entry_id,
+                    confidence=verdict.confidence,
+                    reason=verdict.reason,
+                    latency_ms=int((self._clock() - started) * 1000),
                 )
-            except httpx.HTTPError:
-                # Never surface exception strings: the request URL may reveal a token.
-                self._record_failure("network")
-                if attempt == self.config.retries:
-                    break
-                continue
-            if response.status_code == 429:
-                if attempt < self.config.retries:
-                    await self._sleep(_retry_after(response))
-                    continue
-                self._record_rate_limit(response.text)
-                break
-            if response.status_code >= 400:
-                if (
-                    response.status_code == 400
-                    and not json_mode_dropped
-                    and "response_format" in response.text
-                    and "response_format" in payload
-                ):
-                    # Провайдер не поддерживает JSON-режим: пробуем без него.
-                    json_mode_dropped = True
-                    payload = {
-                        key: value for key, value in payload.items() if key != "response_format"
-                    }
-                    continue
-                kind = f"http_{response.status_code}"
-                self._record_failure(kind, response.text)
-                if response.status_code >= 500 and attempt < self.config.retries:
-                    await self._sleep(self.RETRY_BACKOFF)
-                    continue
-                break
-            try:
-                message = response.json()["choices"][0]["message"]
-                content = message.get("content")
-                reasoning = message.get("reasoning_content")
-            except (ValueError, KeyError, IndexError, TypeError, AttributeError):
-                self._record_failure("bad_response", response.text)
-                break
-            verdict = parse_verdict(content)
-            if verdict is None:
-                # Some reasoning models keep the JSON only in the thinking channel.
-                verdict = parse_verdict(reasoning)
-            if verdict is None:
-                self._record_format_failure(str(content))
-                break
-            self._record_success(verdict)
-            return RouteVerdict(
-                action=verdict.action,
-                entry_id=verdict.entry_id,
-                confidence=verdict.confidence,
-                reason=verdict.reason,
-                latency_ms=int((self._clock() - started) * 1000),
-            )
         self.fallbacks += 1
         return None

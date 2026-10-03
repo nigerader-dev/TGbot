@@ -512,3 +512,86 @@ def test_auto_guesses_the_provider_from_the_key_prefix(api_key, provider):
     assert configs[0].api_key == api_key
     if provider != "openai":
         assert "openai" in [config.provider for config in configs]  # остаётся как запасной
+
+
+# -- замена устаревшего имени модели ----------------------------------------
+
+
+def gemini_config(**overrides) -> LLMConfig:
+    data = {
+        "provider": "gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-3.5-flash-lite",
+        "api_key": FAKE_KEY,
+        "timeout": 5.0,
+        "retries": 0,
+        "model_candidates": ("gemini-3.1-flash-lite", "gemini-2.5-flash"),
+    }
+    data.update(overrides)
+    return LLMConfig(**data)
+
+
+def test_gemini_preset_knows_alternate_model_names():
+    config = resolve_llm_config({"LLM_PROVIDER": "gemini", "LLM_API_KEY": FAKE_KEY})
+    assert config is not None
+    assert config.models == ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash")
+
+
+def test_an_outdated_model_name_is_replaced_automatically():
+    models = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        models.append(body["model"])
+        if body["model"] == "gemini-3.5-flash-lite":
+            return httpx.Response(
+                404,
+                json={
+                    "error": {
+                        "message": (
+                            "models/gemini-3.5-flash-lite is not found for API version v1beta"
+                        ),
+                        "code": 404,
+                    }
+                },
+            )
+        return completion('{"action":"answer","entry_id":"kan_ultra_maintenance"}')
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    router = LLMRouter(gemini_config(), client=client)
+    verdict = route(router)
+    assert verdict is not None and verdict.entry_id == "kan_ultra_maintenance"
+    assert models == ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    assert router.active_model == "gemini-3.1-flash-lite"
+    assert router.state == "ready"
+    assert router.answered == 1
+    assert router.public_view()["active_model"] == "gemini-3.1-flash-lite"
+
+
+def test_exhausted_model_candidates_fall_back_to_the_rules():
+    def handler(request):
+        return httpx.Response(404, json={"error": {"message": "model is not found"}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    router = LLMRouter(gemini_config(), client=client)
+    assert route(router) is None
+    assert router.fallbacks == 1
+    assert router.last_error == "model_404"
+    assert router.state == "ready"  # это ошибка настройки, а не сбой провайдера
+
+
+def test_a_model_error_is_not_reported_as_a_connection_failure():
+    """Опечатка в LLM_MODEL не должна выключать провайдера на 5 минут."""
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content)["model"])
+        return httpx.Response(400, json={"error": {"message": "Unknown model: gpt-99"}})
+
+    outdated = config(retries=0, model="gpt-99", model_candidates=())
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    router = LLMRouter(outdated, client=client)
+    assert route(router) is None
+    assert router.last_error == "model_400"
+    assert router.state == "ready"
+    assert seen == ["gpt-99"]

@@ -10,7 +10,7 @@ sandbox + настоящие GitHub Actions репозитория `nigerader-de
 - `ruff check .` — без замечаний; `ruff format --check .` — 24 файла уже
   отформатированы.
 - `pytest --cov=service_bot --cov-report=term-missing --cov-fail-under=90` —
-  **274 passed**, покрытие **96%**.
+  **279 passed**, покрытие **96%**.
 - `node --check service_bot/static/app.js` — синтаксис JavaScript корректен.
 - Тесты ИИ-слоя (`tests/test_ai.py`, `tests/test_llm.py`) используют
   `httpx.MockTransport`: реальных сетевых вызовов и ключей в тестах нет.
@@ -21,6 +21,11 @@ sandbox + настоящие GitHub Actions репозитория `nigerader-de
   ключ `GEMINI_API_KEY`/`GROQ_API_KEY` без переменной `LLM_PROVIDER`, ключ с префиксом
   (`AIza…`, `gsk_…`, `sk-or-…`) и что JSON-режим автоматически снимается, если
   провайдер его не поддерживает.
+- Проверена замена устаревшего имени модели: если провайдер отвечает «model not found»,
+  роутер сам пробует следующие имена из пресета (`gemini-3.5-flash-lite` →
+  `gemini-3.1-flash-lite` → `gemini-2.5-flash`, `openai/gpt-oss-20b` →
+  `openai/gpt-oss-120b` → `llama-3.3-70b-versatile`), не выключая провайдера, а в
+  ответе и `/status` видно фактически использованную модель.
 - Модели у провайдеров сверены с официальными страницами (октябрь 2026):
   OpenAI `gpt-6-luna`, Google `gemini-3.5-flash-lite`, Groq `openai/gpt-oss-20b`
   (прежние `gpt-4o-mini`, `gemini-2.0-flash`, `llama-3.1-8b-instant` устарели).
