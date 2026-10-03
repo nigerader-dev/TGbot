@@ -94,8 +94,12 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           GH_MODELS_TOKEN: ${{ github.token }}
         run: |
+          set +e
           python scripts/check_phrasings.py --json "$RUNNER_TEMP/phrasings.json" \
-            > "$RUNNER_TEMP/phrasings.txt" 2>&1 || true
+            > "$RUNNER_TEMP/phrasings.txt" 2>&1
+          echo "$?" > "$RUNNER_TEMP/phrasings.status"
+          set -e
+          echo "phrasings exit code: $(cat "$RUNNER_TEMP/phrasings.status")"
           tail -n 12 "$RUNNER_TEMP/phrasings.txt"
 
       - name: Publish the AI check to the pull request
@@ -115,6 +119,15 @@ jobs:
                 echo "### Понимание формулировок (ответы строго из базы)"
                 echo ""
                 python scripts/phrasings_report.py "$RUNNER_TEMP/phrasings.json" || true
+                echo ""
+              else
+                echo "### Понимание формулировок: отчёт не собрался"
+                echo ""
+                echo "Код выхода: $(cat "$RUNNER_TEMP/phrasings.status" 2>/dev/null || echo 'неизвестен')"
+                echo ""
+                echo '```'
+                tail -n 25 "$RUNNER_TEMP/phrasings.txt" 2>/dev/null || true
+                echo '```'
                 echo ""
               fi
               echo "Bot API проверяется следующим шагом; живая сессия — в job *Manual live Telegram test*."

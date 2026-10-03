@@ -72,7 +72,7 @@ def main() -> int:
         print(f"Конвейер с ИИ-моделью: {assistant.model_label}")
     else:
         print("ИИ-модель не настроена: проверяются детерминированные правила базы.")
-    pause = args.pause if args.pause is not None else (2.0 if assistant.enabled else 0.0)
+    pause = args.pause if args.pause is not None else (1.2 if assistant.enabled else 0.0)
 
     failures: list[str] = []
     rows: list[dict] = []
